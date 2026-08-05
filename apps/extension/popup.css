@@ -1,0 +1,16 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; }
+body { margin: 0; min-width: 360px; color: #202124; background: #faf9f7; }
+main { padding: 16px; }
+h1 { margin: 0 0 8px; font-size: 20px; }
+p { margin: 8px 0; font-size: 12px; }
+.card { margin: 10px 0; padding: 10px; border: 1px solid #dedbd5; border-radius: 8px; background: white; font-size: 12px; }
+.card div { margin-top: 4px; word-break: break-word; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+button { border: 0; border-radius: 7px; padding: 9px 8px; cursor: pointer; background: #1f6feb; color: white; font-weight: 600; font-size: 12px; }
+button.secondary { background: #e9e6e0; color: #202124; }
+.error { color: #b42318; min-height: 16px; }
+.success { color: #137333; min-height: 16px; }
+.options { min-width: 420px; }
+form { display: grid; gap: 12px; max-width: 520px; }
+label { display: grid; gap: 5px; font-size: 13px; font-weight: 600; }
+input { padding: 8px; border: 1px solid #b9b5ad; border-radius: 6px; font: inherit; }

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tokia Importer</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+  <main>
+    <h1>Tokia</h1>
+    <p id="status">Detectando pestaña…</p>
+    <section class="card"><strong>Board</strong><div id="board-info">—</div></section>
+    <section class="card"><strong>Progreso</strong><div id="progress">0 Pins</div></section>
+    <div class="grid">
+      <button id="scan-visible">Scan visible Pins</button><button id="scan-full">Scan entire board</button>
+      <button id="stop-scan" class="secondary">Stop scan</button><button id="send">Send to application</button>
+      <button id="copy" class="secondary">Copy JSON</button><button id="download" class="secondary">Download JSON</button>
+      <button id="test-connection" class="secondary">Test connection</button><button id="settings" class="secondary">Open settings</button>
+    </div>
+    <p id="result" class="success"></p><p id="error" class="error"></p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

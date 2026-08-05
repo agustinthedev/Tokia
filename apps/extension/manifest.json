@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Tokia Pinterest Board Importer",
+  "version": "0.1.0",
+  "description": "Scan Pins from the Pinterest board currently open in your authenticated browser session and send references to Tokia.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "https://*.pinterest.com/*",
+    "https://pin.it/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "action": {
+    "default_title": "Import Pinterest board to Tokia",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": []
+}

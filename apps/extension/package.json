@@ -1,0 +1,14 @@
+{
+  "name": "@tokia/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prebuild": "npm run build --workspace @tokia/shared",
+    "build": "tsx build.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tokia/shared": "0.1.0"
+  }
+}
