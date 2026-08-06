@@ -1773,7 +1773,7 @@ function ProjectDialog({ project, onClose, onSaved }: { project?: Project; onClo
   const [color, setColor] = useState(project?.color ?? "#b9f36b");
   const [selected, setSelected] = useState<Set<string>>(new Set(project?.collections?.map((item) => item.id) ?? []));
   const [search, setSearch] = useState("");
-  const [defaults, setDefaults] = useState<AnyRecord>({
+  const initialDefaults = project?.config ?? {
     aspectRatio: project?.config?.aspectRatio ?? "9:16",
     preferredContentTypes: project?.config?.preferredContentTypes ?? ["single_image", "carousel", "video_slideshow"],
     textMode: project?.config?.textMode ?? "headline_and_body",
@@ -1788,10 +1788,30 @@ function ProjectDialog({ project, onClose, onSaved }: { project?: Project; onClo
       overlay: true,
       overlayOpacity: 0.5,
     },
+  };
+  const initialProjectState = useRef({
+    name: project?.name ?? "",
+    description: project?.description ?? "",
+    niche: project?.niche ?? "",
+    language: project?.defaultLanguage ?? "English",
+    notes: project?.internalNotes ?? "",
+    color: project?.color ?? "#b9f36b",
+    selected: (project?.collections?.map((item) => item.id) ?? []).sort(),
+    defaults: initialDefaults,
   });
+  const [defaults, setDefaults] = useState<AnyRecord>(initialDefaults);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const dirty = Boolean(name.trim() || description.trim() || niche.trim() || selected.size);
+  const dirty = JSON.stringify({
+    name,
+    description,
+    niche,
+    language,
+    notes,
+    color,
+    selected: [...selected].sort(),
+    defaults,
+  }) !== JSON.stringify(initialProjectState.current);
   const close = () => {
     if (dirty && !window.confirm("Discard unsaved project changes?")) return;
     onClose();
@@ -2168,8 +2188,11 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const assets = useApi<{ items: Asset[]; pagination: Pagination }>("/api/assets?pageSize=100");
-  const dirty = Boolean(content || step > 1);
-  const updateConfig = (key: string, value: unknown) => setConfig((current) => ({ ...current, [key]: value }));
+  const [dirty, setDirty] = useState(false);
+  const updateConfig = (key: string, value: unknown) => {
+    setDirty(true);
+    setConfig((current) => ({ ...current, [key]: value }));
+  };
   const patchContent = async (body: AnyRecord): Promise<ContentDetail | undefined> => {
     if (!content) return undefined;
     const updated = await request<ContentDetail>(`/api/content/${content.id}`, {
@@ -2177,6 +2200,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
       body: JSON.stringify(body),
     });
     setContent(updated);
+    setDirty(false);
     return updated;
   };
   const refreshContent = async (id = content?.id) => {
@@ -2196,6 +2220,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
         setConfig(loaded.configuration);
         setSelectedCollections(loaded.configuration.sourceCollectionIds ?? []);
         setStep(loaded.status === "preview_ready" || loaded.status === "ready" ? 7 : 4);
+        setDirty(false);
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load the draft"));
     return () => {
@@ -2239,6 +2264,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     try {
       const selected = await request<ContentDetail>(`/api/content/${created.id}/images/select`, { method: "POST", body: JSON.stringify({}) });
       setContent(selected);
+      setDirty(false);
       return selected;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not select source images");
@@ -2306,6 +2332,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/images/select`, { method: "POST", body: JSON.stringify({}) }));
       setDurationDrafts({});
+      setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not select images");
     } finally {
@@ -2318,6 +2345,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/images/shuffle`, { method: "POST", body: JSON.stringify({}) }));
       setDurationDrafts({});
+      setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not shuffle images");
     } finally {
@@ -2328,11 +2356,13 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     if (!content) return;
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, { method: "PATCH", body: JSON.stringify({ [field]: !frame[field] }) }));
+      setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update lock");
     }
   };
-  const editFrame = (frame: ContentFrame, field: "headline" | "body", value: string) =>
+  const editFrame = (frame: ContentFrame, field: "headline" | "body", value: string) => {
+    setDirty(true);
     setContent((current) =>
       current
         ? {
@@ -2341,6 +2371,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
           }
         : current,
     );
+  };
   const saveFrame = async (frame: ContentFrame) => {
     if (!content) return;
     try {
@@ -2353,6 +2384,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
           }),
         }),
       );
+      setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save text");
     }
@@ -2370,6 +2402,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     }
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, { method: "PATCH", body: JSON.stringify({ durationSeconds: value }) }));
+      setDirty(false);
       setDurationDrafts((current) => {
         const next = { ...current };
         delete next[frame.id];
@@ -2388,6 +2421,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
       const endpoint = content.narrative ? "narrative/regenerate" : "narrative";
       const result = await request<{ content: ContentDetail; job: AnyRecord }>(`/api/content/${content.id}/${endpoint}`, { method: "POST", body: JSON.stringify({}) });
       setContent(result.content);
+      setDirty(false);
       captionDraft.current = result.content.narrative?.caption ?? result.content.configuration.caption ?? "";
       setNotice(content.narrative ? "Copy regeneration queued." : "Copy generation queued. The fields will update automatically.");
     } catch (caught) {
@@ -2397,6 +2431,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     }
   };
   const editCaption = (value: string) => {
+    setDirty(true);
     captionDraft.current = value;
     setContent((current) =>
       current
@@ -2422,6 +2457,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
           }),
         }),
       );
+      setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save caption");
     }
@@ -2447,6 +2483,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
         }),
       });
       setContent(latest);
+      setDirty(false);
     } finally {
       setSaving(false);
     }
@@ -2458,6 +2495,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     try {
       const result = await request<{ content: ContentDetail; job: AnyRecord }>(`/api/content/${content.id}/preview`, { method: "POST", body: JSON.stringify({}) });
       setContent(result.content);
+      setDirty(false);
       setNotice("Preview is rendering locally.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not generate preview");
@@ -2471,6 +2509,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     try {
       const result = await request<{ content: ContentDetail; job: AnyRecord }>(`/api/content/${content.id}/confirm`, { method: "POST", body: JSON.stringify({}) });
       setContent(result.content);
+      setDirty(false);
       setNotice("Final generation queued. You can close this dialog and watch the project list update.");
       onSaved();
     } catch (caught) {
@@ -2529,6 +2568,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
                 key={value}
                 className={`content-type-card ${type === value ? "selected" : ""}`}
                 onClick={() => {
+                  setDirty(true);
                   setType(value);
                   if (value === "single_image")
                     setConfig((current) => ({
@@ -2559,7 +2599,15 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
           </div>
           <div className="collection-selector">
             {(project.collections ?? []).map((collection) => (
-              <button type="button" key={collection.id} className={`selector-card ${selectedCollections.includes(collection.id) ? "selected" : ""}`} onClick={() => setSelectedCollections((current) => (current.includes(collection.id) ? current.filter((value) => value !== collection.id) : [...current, collection.id]))}>
+              <button
+                type="button"
+                key={collection.id}
+                className={`selector-card ${selectedCollections.includes(collection.id) ? "selected" : ""}`}
+                onClick={() => {
+                  setDirty(true);
+                  setSelectedCollections((current) => (current.includes(collection.id) ? current.filter((value) => value !== collection.id) : [...current, collection.id]));
+                }}
+              >
                 {collection.coverPreviewUrl ? <img className="selector-cover" src={collection.coverPreviewUrl} alt="" /> : <span className="selector-cover-fallback">{collection.name.slice(0, 1)}</span>}
                 <span className="selector-check">{selectedCollections.includes(collection.id) ? "✓" : ""}</span>
                 <div>
@@ -2703,7 +2751,10 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
                         max={frameDurationMaximum(frame)}
                         step="0.1"
                         value={durationDrafts[frame.id] ?? String(frame.durationSeconds ?? config.video?.secondsPerImage ?? 2.5)}
-                        onChange={(event) => setDurationDrafts((current) => ({ ...current, [frame.id]: event.target.value }))}
+                        onChange={(event) => {
+                          setDirty(true);
+                          setDurationDrafts((current) => ({ ...current, [frame.id]: event.target.value }));
+                        }}
                         onBlur={() => void saveFrameDuration(frame)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
