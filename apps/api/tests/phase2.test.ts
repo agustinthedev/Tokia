@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
 import { createDatabase } from '../src/db.js';
@@ -125,5 +125,28 @@ describe('Phase 2 management API', () => {
     });
     expect(archived.statusCode).toBe(200);
     expect(archived.json().status).toBe('archived');
+  });
+
+  it('resolves a deferred Pinterest video source on demand', async () => {
+    ({ db, app } = await setup());
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/imports/pinterest-board',
+      headers: { 'x-local-integration-token': token },
+      payload: {
+        schemaVersion: 1,
+        source: 'pinterest-browser-extension',
+        exportedAt: new Date().toISOString(),
+        board: { name: 'Deferred video board', url: 'https://www.pinterest.com/demo/deferred/' },
+        pins: [pin('deferred-video', { mediaType: 'video' })]
+      }
+    });
+    expect(imported.statusCode).toBe(200);
+    const assetId = (db!.prepare('SELECT id FROM assets WHERE external_asset_id = ?').get('deferred-video') as { id: string }).id;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"videoList720P":{"v720P":{"url":"https:\\/\\/v1.pinimg.com\\/videos\\/clip_720w.mp4"}},"duration":"PT13S"}', { status: 200 })));
+    const resolved = await app.inject({ method: 'POST', url: `/api/assets/${assetId}/resolve-media`, headers: { 'x-local-integration-token': token } });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json()).toMatchObject({ mediaType: 'video', mediaUrl: 'https://v1.pinimg.com/videos/clip_720w.mp4', mimeType: 'video/mp4' });
+    vi.unstubAllGlobals();
   });
 });

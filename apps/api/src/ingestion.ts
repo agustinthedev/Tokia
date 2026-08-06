@@ -7,6 +7,7 @@ import {
   normalizePinterestBoardUrl,
   chooseBestImageUrl,
   derivePreviewUrl,
+  isPlayableVideoUrl,
   cleanOptionalText,
   type NormalizedPin,
   type ImportResponse,
@@ -173,13 +174,15 @@ function findAsset(db: Database.Database, pin: NormalizedPin): AssetRow | undefi
 
 function updateAsset(db: Database.Database, existing: AssetRow, pin: NormalizedPin, timestamp: string): boolean {
   const best = chooseBestImageUrl(pin);
+  const nextMediaType = pin.mediaType ?? existing.media_type;
+  const existingMediaUrl = nextMediaType === 'video' && !isPlayableVideoUrl(existing.remote_media_url) ? null : existing.remote_media_url;
   const useIncomingImage = (existing.width === null && best.width !== null) ||
     (best.width !== null && (existing.width === null || best.width > existing.width));
   const next = {
     remote_image_url: useIncomingImage ? best.imageUrl : existing.remote_image_url,
-    remote_media_url: pin.mediaUrl ?? existing.remote_media_url ?? best.imageUrl,
+    remote_media_url: pin.mediaUrl ?? existingMediaUrl ?? (nextMediaType === 'video' ? null : best.imageUrl),
     remote_preview_url: existing.remote_preview_url ?? derivePreviewUrl(pin),
-    media_type: pin.mediaType ?? existing.media_type,
+    media_type: nextMediaType,
     mime_type: pin.mimeType ?? existing.mime_type,
     duration_seconds: pin.durationSeconds ?? existing.duration_seconds,
     normalized_image_key: existing.normalized_image_key ?? pin.normalizedImageKey,
@@ -230,7 +233,7 @@ function insertAsset(db: Database.Database, pin: NormalizedPin, timestamp: strin
     external_asset_id: pin.externalId,
     canonical_asset_url: pin.canonicalUrl,
     remote_image_url: best.imageUrl,
-    remote_media_url: pin.mediaUrl,
+    remote_media_url: pin.mediaUrl ?? (pin.mediaType === 'video' ? null : best.imageUrl),
     remote_preview_url: pin.previewUrl ?? derivePreviewUrl(pin),
     media_type: pin.mediaType,
     duration_seconds: pin.durationSeconds,

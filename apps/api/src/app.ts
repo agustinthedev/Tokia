@@ -5,10 +5,11 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type Database from 'better-sqlite3';
-import { assetStatusSchema, collectionStatusSchema } from '@tokia/shared';
+import { assetStatusSchema, collectionStatusSchema, isPlayableVideoUrl } from '@tokia/shared';
 import { config as defaultConfig } from './config.js';
 import { createDatabase } from './db.js';
 import { getCollection, getImportRun, IngestionError, ingestPinterestBoard } from './ingestion.js';
+import { resolvePinterestVideo } from './pinterest-media.js';
 
 type AppSettings = typeof defaultConfig;
 type QueryRecord = Record<string, string | undefined>;
@@ -75,7 +76,9 @@ function toCollection(row: Row): Row {
 function toAsset(row: Row): Row {
   const kind = mediaType(row);
   const imageUrl = row.remote_image_url;
-  const mediaUrl = row.remote_media_url ?? imageUrl;
+  const mediaUrl = kind === 'video'
+    ? (isPlayableVideoUrl(typeof row.remote_media_url === 'string' ? row.remote_media_url : null) ? row.remote_media_url : null)
+    : row.remote_media_url ?? imageUrl;
   return {
     id: row.id,
     provider: row.provider,
@@ -353,6 +356,26 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
     if (!row) return reply.code(404).send({ error: { code: 'ASSET_NOT_FOUND', message: 'Asset not found' } });
     const collections = db.prepare(`SELECT c.*, COUNT(ca2.asset_id) AS asset_count FROM collection_assets ca JOIN collections c ON c.id = ca.collection_id LEFT JOIN collection_assets ca2 ON ca2.collection_id = c.id WHERE ca.asset_id = ? GROUP BY c.id`).all(id) as Row[];
     return { ...toAsset(row), collections: collections.map(toCollection) };
+  });
+
+  app.post('/api/assets/:id/resolve-media', { schema: { tags: ['assets'], summary: 'Resolve deferred Pinterest video media' } }, async (request, reply) => {
+    if (!integrationGuard(settings, request, reply)) return;
+    const { id } = request.params as { id: string };
+    const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Row | undefined;
+    if (!row) return reply.code(404).send({ error: { code: 'ASSET_NOT_FOUND', message: 'Asset not found' } });
+    if (mediaType(row) !== 'video') return reply.code(422).send({ error: { code: 'ASSET_IS_NOT_VIDEO', message: 'Only video assets can resolve media' } });
+    if (isPlayableVideoUrl(typeof row.remote_media_url === 'string' ? row.remote_media_url : null)) return toAsset(row);
+    if (typeof row.canonical_asset_url !== 'string' || !row.canonical_asset_url) return reply.code(422).send({ error: { code: 'VIDEO_SOURCE_UNAVAILABLE', message: 'This video has no Pinterest source URL' } });
+    const resolved = await resolvePinterestVideo(row.canonical_asset_url);
+    if (!resolved.mediaUrl) return reply.code(422).send({ error: { code: 'VIDEO_SOURCE_UNAVAILABLE', message: 'Pinterest did not expose a playable video URL for this Pin' } });
+    db.prepare(`UPDATE assets SET
+      remote_media_url = ?,
+      remote_preview_url = COALESCE(?, remote_preview_url),
+      mime_type = COALESCE(?, mime_type),
+      duration_seconds = COALESCE(?, duration_seconds),
+      updated_at = ?
+      WHERE id = ?`).run(resolved.mediaUrl, resolved.posterUrl, resolved.mimeType, resolved.durationSeconds, now(), id);
+    return toAsset(db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Row);
   });
 
   app.get('/api/import-runs', { schema: { tags: ['imports'], summary: 'List import runs' } }, async (request) => {

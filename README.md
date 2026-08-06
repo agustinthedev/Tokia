@@ -299,7 +299,7 @@ The extension scanner recognizes Pinterest video cards from `<video>`, `<source>
 
 ### Phase 2 API surface
 
-The UI uses `GET /api/dashboard`, `/api/settings`, `/api/search`, collection and asset list/detail routes, project CRUD and project-collection association routes, and import-run list/detail routes. Mutation routes retain the local integration token boundary. Image cards use lazy remote previews. Video cards use poster-first rendering and an explicit play affordance; the detail drawer attempts defensive playback and preserves an open-original fallback when a remote host blocks embedding or a URL is unavailable.
+The UI uses `GET /api/dashboard`, `/api/settings`, `/api/search`, collection and asset list/detail routes, project CRUD and project-collection association routes, and import-run list/detail routes. Mutation routes retain the local integration token boundary. Image cards use lazy remote previews. Video cards use poster-first rendering and an explicit play affordance; the detail drawer resolves deferred Pinterest video metadata when necessary, persists the direct MP4 source, and mounts native playback controls with the original Pin as fallback.
 
 ### Deferred generation layer
 

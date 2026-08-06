@@ -114,9 +114,9 @@ export function normalizePin(input: {
   const extractedId = extractPinterestPinId(input.pinUrl);
   const externalId = cleanOptionalText(input.externalId) ?? extractedId;
   const canonicalUrl = pinUrl;
-  const mediaUrl = normalizeRemoteUrl(input.mediaUrl ?? input.imageUrl);
+  const mediaUrl = normalizeRemoteUrl(input.mediaUrl);
   const imageUrl = normalizeRemoteUrl(input.imageUrl) ?? mediaUrl;
-  if (!mediaUrl || !imageUrl) throw new Error('Pin imageUrl or mediaUrl must be a valid http(s) URL');
+  if (!imageUrl) throw new Error('Pin imageUrl or mediaUrl must be a valid http(s) URL');
   const imageVariants: ImageVariant[] = [];
   for (const variant of input.imageVariants ?? []) {
     const url = normalizeRemoteUrl(variant.url);

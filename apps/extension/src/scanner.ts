@@ -1,5 +1,6 @@
 import {
   extractPinterestPinId,
+  extractPinterestVideoMedia,
   normalizePinimgImageKey,
   normalizePinterestBoardUrl,
   normalizePinterestPinUrl,
@@ -301,14 +302,41 @@ export async function scanBoard(document: Document, settings: ScanSettings, call
     if (collected.size >= settings.maxPins) phase = 'max-pins';
   }
   if (phase === 'scanning') phase = 'complete';
+  const pins = await resolveDeferredVideos(Array.from(collected.values()).slice(0, settings.maxPins));
   const payload: IngestionPayload = {
     schemaVersion: 1,
     source: 'pinterest-browser-extension',
     exportedAt: new Date().toISOString(),
     board: { externalId: board.externalId, name: board.name, url: board.url, description: null },
-    pins: Array.from(collected.values()).slice(0, settings.maxPins)
+    pins
   };
   const progress: ScanProgress = { mode: settings.mode, phase, rounds, uniquePins: payload.pins.length, visiblePins: extractVisiblePins(document).length };
   callbacks.onProgress?.(progress);
   return { payload, progress };
+}
+
+async function resolveDeferredVideos(pins: IngestionPin[]): Promise<IngestionPin[]> {
+  const unresolved = pins.filter((pin) => pin.mediaType === 'video' && !pin.mediaUrl && pin.pinUrl);
+  if (!unresolved.length || typeof fetch !== 'function') return pins;
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < unresolved.length) {
+      const pin = unresolved[nextIndex++];
+      if (!pin?.pinUrl) continue;
+      try {
+        const response = await fetch(pin.pinUrl, { credentials: 'include', headers: { Accept: 'text/html' } });
+        if (!response.ok) continue;
+        const media = extractPinterestVideoMedia(await response.text());
+        if (!media.mediaUrl) continue;
+        pin.mediaUrl = media.mediaUrl;
+        pin.mimeType = media.mimeType ?? pin.mimeType;
+        pin.durationSeconds = media.durationSeconds ?? pin.durationSeconds;
+        if (!pin.imageUrl && media.posterUrl) pin.imageUrl = media.posterUrl;
+      } catch {
+        // Pinterest may block individual pin-page requests; keep the video marker and poster.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, unresolved.length) }, () => worker()));
+  return pins;
 }
