@@ -113,6 +113,7 @@ interface ContentFrame {
   role: string;
   headline?: string | null;
   body?: string | null;
+  durationSeconds?: number | null;
   textLocked: boolean;
   imageLocked: boolean;
   sourceMedia?: Asset | null;
@@ -2160,6 +2161,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     },
   });
   const [content, setContent] = useState<ContentDetail | null>(null);
+  const [durationDrafts, setDurationDrafts] = useState<Record<string, string>>({});
   const captionDraft = useRef("");
   const captionContentId = useRef<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
@@ -2303,6 +2305,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     setError("");
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/images/select`, { method: "POST", body: JSON.stringify({}) }));
+      setDurationDrafts({});
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not select images");
     } finally {
@@ -2314,6 +2317,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     setSaving(true);
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/images/shuffle`, { method: "POST", body: JSON.stringify({}) }));
+      setDurationDrafts({});
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not shuffle images");
     } finally {
@@ -2351,6 +2355,29 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save text");
+    }
+  };
+  const frameDurationMaximum = (frame: ContentFrame) => {
+    const source = frame.sourceMedia;
+    return source && (source.mediaType === "video" || source.mediaType === "animated") && source.durationSeconds && source.durationSeconds > 0 ? source.durationSeconds : 30;
+  };
+  const saveFrameDuration = async (frame: ContentFrame) => {
+    if (!content || durationDrafts[frame.id] === undefined) return;
+    const value = Number(durationDrafts[frame.id]);
+    if (!Number.isFinite(value)) {
+      setError("Enter a valid duration in seconds.");
+      return;
+    }
+    try {
+      setContent(await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, { method: "PATCH", body: JSON.stringify({ durationSeconds: value }) }));
+      setDurationDrafts((current) => {
+        const next = { ...current };
+        delete next[frame.id];
+        return next;
+      });
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save frame duration");
     }
   };
   const generateCopy = async () => {
@@ -2660,17 +2687,46 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
                 <span className="frame-number">{frame.position}</span>
                 <div className="frame-selection-preview">{(frame.sourceMedia?.imageUrl ?? frame.sourceMedia?.previewUrl) ? <img src={frame.sourceMedia.imageUrl ?? frame.sourceMedia.previewUrl} alt="" /> : <span>?</span>}</div>
                 <div>
-                  <strong>{frame.role}</strong>
+                  <strong>{frame.role}{frame.sourceMedia ? ` (${frame.sourceMedia.mediaType === "video" || frame.sourceMedia.mediaType === "animated" ? "video" : "image"})` : ""}</strong>
                   <span>
-                    {frame.sourceMedia?.collectionName ?? "No image selected"}
+                    {frame.sourceMedia?.collectionName ?? "No content selected"}
                     {frame.sourceMedia?.width && frame.sourceMedia?.height ? ` · ${frame.sourceMedia.width} × ${frame.sourceMedia.height}` : ""}
                   </span>
                 </div>
+                {type === "video_slideshow" && (
+                  <label className="frame-duration-control">
+                    <span>Duration</span>
+                    <div className="frame-duration-input">
+                      <input
+                        type="number"
+                        min="0.1"
+                        max={frameDurationMaximum(frame)}
+                        step="0.1"
+                        value={durationDrafts[frame.id] ?? String(frame.durationSeconds ?? config.video?.secondsPerImage ?? 2.5)}
+                        onChange={(event) => setDurationDrafts((current) => ({ ...current, [frame.id]: event.target.value }))}
+                        onBlur={() => void saveFrameDuration(frame)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        aria-label={`Duration for frame ${frame.position}`}
+                      />
+                      <span>s</span>
+                    </div>
+                    <small>
+                      {frame.sourceMedia?.durationSeconds && (frame.sourceMedia.mediaType === "video" || frame.sourceMedia.mediaType === "animated")
+                        ? `Original ${frame.sourceMedia.durationSeconds.toFixed(2)}s · trim only`
+                        : `Default ${Number(config.video?.secondsPerImage ?? 2.5).toFixed(1)}s`}
+                    </small>
+                  </label>
+                )}
                 <Button onClick={() => lockFrame(frame, "imageLocked")}>{frame.imageLocked ? "Unlock image" : "Lock image"}</Button>
               </div>
             ))}
           </div>
-          <p className="wizard-help">Content is linked to the original collection records. Source previews stay visible so you can replace them before rendering.</p>
+          <p className="wizard-help">Content is linked to the original collection records. Source previews stay visible so you can replace them before rendering.{type === "video_slideshow" ? " Set each scene duration here; images use the global default and videos start at their original length." : ""}</p>
           {assets.data?.items.length ? (
             <details>
               <summary>Manual replacement sources</summary>
