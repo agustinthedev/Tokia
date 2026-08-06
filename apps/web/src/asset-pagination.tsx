@@ -102,7 +102,7 @@ export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAss
   useEffect(() => {
     const node = sentinelRef.current;
     if (!node || !hasMore) return;
-    const root = node.closest<HTMLElement>('.main-area');
+    const root = node.closest<HTMLElement>('.page-content') ?? node.closest<HTMLElement>('.main-area');
     const scrollTarget = root ?? window;
     const checkScrollPosition = () => {
       const containerBottom = root?.getBoundingClientRect().bottom ?? window.innerHeight;
