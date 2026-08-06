@@ -37,17 +37,22 @@ a { color: var(--green); }
 .sidebar-collapsed .sidebar { width: 78px; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 12px 40px; font-family: 'Space Grotesk', 'DM Sans', sans-serif; font-size: 19px; font-weight: 700; letter-spacing: -.03em; }
 .brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 11px; color: #11170d; background: var(--green); box-shadow: 0 0 20px rgba(185,243,107,.26); }
-.sidebar-collapsed .brand span, .sidebar-collapsed .nav-item span, .sidebar-collapsed .connection-card span:not(.online-dot) { display: none; }
+.sidebar-collapsed .brand > span, .sidebar-collapsed .nav-item > span:not(.icon), .sidebar-collapsed .connection-card > span:not(.online-dot) { display: none; }
+.sidebar-collapsed .brand { justify-content: center; padding-left: 0; padding-right: 0; }
+.sidebar-collapsed .brand-mark { width: 40px; height: 40px; border-radius: 14px; font-size: 18px; }
 .nav-list { display: grid; gap: 6px; }
 .nav-item { width: 100%; border: 0; background: transparent; color: var(--muted); display: flex; align-items: center; gap: 13px; padding: 12px 13px; border-radius: 13px; text-align: left; transition: .18s ease; }
+.sidebar-collapsed .nav-item { justify-content: center; padding: 12px; }
 .nav-item:hover { color: var(--text); background: var(--surface); }
 .nav-item.active { color: #587f15; background: rgba(184,255,52,.22); box-shadow: inset 3px 0 0 var(--green-deep); }
 .icon { display: inline-flex; width: 18px; justify-content: center; font-family: 'Segoe UI Symbol', 'Noto Sans Symbols 2', 'Apple Symbols', sans-serif; font-size: 17px; line-height: 1; flex-shrink: 0; }
 .nav-item .icon { font-size: 19px; }
 .sidebar-bottom { display: grid; gap: 12px; margin-top: auto; position: relative; }
 .connection-card { color: var(--muted-2); font-size: 11px; display: flex; gap: 8px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: 13px; white-space: nowrap; overflow: hidden; }
+.sidebar-collapsed .connection-card { justify-content: center; }
 .online-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); flex-shrink: 0; }
 .collapse-button { border: 0; background: transparent; color: var(--muted-2); position: absolute; right: -2px; bottom: 0; transform: translateY(44px); }
+.sidebar-collapsed .collapse-button { right: 50%; transform: translate(50%, 44px); }
 .main-area { min-width: 0; flex: 1; }
 .topbar { height: 78px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 28px; padding: 0 42px; }
 .global-search { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); background: rgba(255,255,255,.9); color: var(--muted); border-radius: 12px; height: 40px; padding: 0 13px; width: min(400px, 100%); text-align: left; box-shadow: 0 8px 24px rgba(68,82,138,.05); }
