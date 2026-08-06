@@ -183,8 +183,8 @@ h1, h2, h3, .brand { font-family: 'Space Grotesk', 'DM Sans', sans-serif; }
 }
 
 body { background: radial-gradient(circle at 12% 0%, #f8fbff 0, transparent 28%), #dfe7f0; }
-.app-shell { width: calc(100vw - 16px); max-width: none; min-height: calc(100vh - 16px); margin: 8px auto; border: 1px solid rgba(255,255,255,.78); border-radius: 24px; overflow: hidden; background: #f7f9fc; box-shadow: 0 20px 64px rgba(52, 72, 108, .16); background-image: none; }
-.sidebar { width: 224px; padding: 26px 14px 19px; background: rgba(251,253,255,.96); border-right: 1px solid var(--border); }
+.app-shell { width: calc(100vw - 16px); max-width: none; height: calc(100vh - 16px); min-height: 0; margin: 8px auto; border: 1px solid rgba(255,255,255,.78); border-radius: 24px; overflow: hidden; background: #f7f9fc; box-shadow: 0 20px 64px rgba(52, 72, 108, .16); background-image: none; }
+.sidebar { width: 224px; height: 100%; padding: 26px 14px 19px; background: rgba(251,253,255,.96); border-right: 1px solid var(--border); }
 .brand { padding: 0 12px 25px; gap: 11px; color: var(--text); font-size: 18px; }
 .brand-mark { width: 36px; height: 36px; border-radius: 12px; color: #fff; background: linear-gradient(145deg, #4386ff, var(--blue-deep)); box-shadow: 0 8px 18px rgba(46,108,246,.25); }
 .nav-list { gap: 4px; }
@@ -200,7 +200,7 @@ body { background: radial-gradient(circle at 12% 0%, #f8fbff 0, transparent 28%)
 .sidebar-collapsed .sidebar { width: 76px; }
 .sidebar-collapsed .brand { padding-left: 0; padding-right: 0; }
 .sidebar-collapsed .collapse-button { right: auto; transform: none; justify-self: center; }
-.main-area { background: #f7f9fc; }
+.main-area { min-height: 0; overflow-y: auto; background: #f7f9fc; }
 .topbar { height: 76px; padding: 0 34px; background: rgba(255,255,255,.84); border-bottom: 1px solid var(--border); }
 .global-search { width: min(430px, 100%); height: 40px; border-color: #e3e9f0; border-radius: 13px; background: #f8fafc; box-shadow: none; }
 .global-search:hover { border-color: #b7c9e1; background: #fff; }
@@ -270,7 +270,7 @@ h2 { color: #263348; font-size: 17px; }
 .asset-detail-preview { background: #edf3f9; }.asset-detail-preview video { background: #eaf0f7; }.remote-note { color: var(--muted-2) !important; }
 
 @media (max-width: 860px) {
-  .app-shell { width: 100%; min-height: 100vh; margin: 0; border-radius: 0; border: 0; }
+  .app-shell { width: 100%; height: 100vh; min-height: 100vh; margin: 0; border-radius: 0; border: 0; }
   .topbar { background: #fff; }
   .page-content { padding: 28px 22px 56px; }
 }
