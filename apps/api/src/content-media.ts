@@ -182,29 +182,57 @@ export async function createThumbnail(options: { ffmpegPath: string; sourcePath:
   return { width: 320, height: 320 };
 }
 
-export async function renderSlideshow(options: { ffmpegPath: string; imagePaths: string[]; outputPath: string; configuration: ContentConfiguration }): Promise<{ width: number; height: number; durationMs: number }> {
-  if (!options.imagePaths.length) throw new MediaProcessingError('NO_IMAGES', 'At least one image is required for a video slideshow.');
+export interface SlideshowScene {
+  path: string;
+  mediaType: 'image' | 'video';
+  durationSeconds: number;
+  text?: TextOverlay | null;
+}
+
+async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowScene; outputPath: string; configuration: ContentConfiguration; width: number; height: number }): Promise<void> {
+  const { scene, configuration, width, height } = options;
+  const filters = [filterFor(configuration, width, height)];
+  const textPaths: string[] = [];
+  try {
+    if (scene.text && configuration.textMode !== 'none') {
+      for (const part of textOverlayLayout(configuration, width, height, scene.text)) {
+        const textPath = `${options.outputPath}.${part.key}.txt`;
+        textPaths.push(textPath);
+        await fsp.writeFile(textPath, part.text.slice(0, part.key === 'headline' ? 120 : 600), 'utf8');
+        const box = configuration.visual.overlay ? `:box=1:boxcolor=black@${Math.max(0, Math.min(1, configuration.visual.overlayOpacity))}:boxborderw=${part.boxBorderWidth}` : '';
+        filters.push(`drawtext=fontfile='${escapedFilterPath(part.fontFile)}':textfile='${escapedFilterPath(textPath)}':fontcolor=${configuration.visual.textColor}:fontsize=${part.fontSize}:x=${part.x}:y=${part.y}:line_spacing=${part.lineSpacing}${box}`);
+      }
+    }
+    const duration = Math.max(0.1, Number(scene.durationSeconds) || configuration.video.secondsPerImage);
+    const input = scene.mediaType === 'video' ? ['-i', scene.path] : ['-loop', '1', '-i', scene.path];
+    await runFfmpeg(options.ffmpegPath, ['-y', ...input, '-t', String(duration), '-vf', `${filters.join(',')},format=yuv420p`, '-an', '-r', String(Math.max(1, Math.min(60, configuration.video.fps))), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', options.outputPath]);
+  } finally {
+    await Promise.all(textPaths.map((textPath) => fsp.rm(textPath, { force: true })));
+  }
+}
+
+export async function renderSlideshow(options: { ffmpegPath: string; imagePaths?: string[]; scenes?: SlideshowScene[]; outputPath: string; configuration: ContentConfiguration }): Promise<{ width: number; height: number; durationMs: number }> {
+  const scenes = options.scenes ?? (options.imagePaths ?? []).map((imagePath) => ({ path: imagePath, mediaType: 'image' as const, durationSeconds: options.configuration.video.secondsPerImage }));
+  if (!scenes.length) throw new MediaProcessingError('NO_IMAGES', 'At least one image or video is required for a video slideshow.');
   const dimensions = ratioDimensions(options.configuration.aspectRatio, options.configuration.video.outputResolution);
   // H.264 with yuv420p requires even dimensions. Keep image exports at their
   // requested dimensions, but make the video canvas encoder-safe.
   const width = dimensions.width % 2 === 0 ? dimensions.width : dimensions.width + 1;
   const height = dimensions.height % 2 === 0 ? dimensions.height : dimensions.height + 1;
   const listPath = `${options.outputPath}.concat.txt`;
-  const seconds = Math.max(0.5, Math.min(30, options.configuration.video.secondsPerImage));
-  const lines = [...options.imagePaths, options.imagePaths.at(-1)!].map((imagePath, index) => {
-    const concatPath = imagePath.replaceAll('\\', '/').replaceAll("'", "'\\''");
-    return `file '${concatPath}'${index < options.imagePaths.length ? `\nduration ${seconds}` : ''}`;
-  });
-  await fsp.writeFile(listPath, lines.join('\n'), 'utf8');
-  const framing = options.configuration.visual.cropMode === 'crop'
-    ? `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`
-    : `scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
+  const clipPaths = scenes.map((_, index) => `${options.outputPath}.scene-${String(index + 1).padStart(2, '0')}.mp4`);
   try {
-    await runFfmpeg(options.ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-vf', `${framing},format=yuv420p`, '-r', String(Math.max(1, Math.min(60, options.configuration.video.fps))), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', options.outputPath]);
+    for (let index = 0; index < scenes.length; index += 1) {
+      await renderSceneClip({ ffmpegPath: options.ffmpegPath, scene: scenes[index]!, outputPath: clipPaths[index]!, configuration: options.configuration, width, height });
+    }
+    const lines = clipPaths.map((clipPath) => `file '${clipPath.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`);
+    await fsp.writeFile(listPath, lines.join('\n'), 'utf8');
+    await runFfmpeg(options.ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', options.outputPath]);
   } finally {
     await fsp.rm(listPath, { force: true });
+    await Promise.all(clipPaths.map((clipPath) => fsp.rm(clipPath, { force: true })));
   }
-  return { width, height, durationMs: Math.round(options.imagePaths.length * seconds * 1000) };
+  return { width, height, durationMs: Math.round(scenes.reduce((total, scene) => total + Math.max(0.1, Number(scene.durationSeconds) || options.configuration.video.secondsPerImage), 0) * 1000) };
 }
 
 export async function sha256File(filePath: string): Promise<string> {

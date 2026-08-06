@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentFrameCount, frameRoles, mergeConfiguration } from '../src/content-model.js';
+import { contentFrameCount, defaultFrameDuration, frameDurationLimit, frameRoles, mergeConfiguration, normalizeFrameDuration } from '../src/content-model.js';
 import { generateNarrative, validateNarrative } from '../src/narrative.js';
 
 describe('content model and narrative contract', () => {
@@ -27,5 +27,14 @@ describe('content model and narrative contract', () => {
     ]);
     expect(validateNarrative(narrative, roles, configuration).frames).toHaveLength(3);
     expect(() => validateNarrative({ ...narrative, frames: narrative.frames.map((frame, index) => index === 1 ? { ...frame, headline: 'Not allowed' } : frame) }, roles, configuration)).toThrow('cover_only');
+  });
+
+  it('uses the global image default and the original video duration per frame', () => {
+    const configuration = mergeConfiguration({ video: { secondsPerImage: 1.5 } });
+    expect(defaultFrameDuration(configuration, 'image')).toBe(1.5);
+    expect(defaultFrameDuration(configuration, 'video', 4.25)).toBe(4.25);
+    expect(frameDurationLimit('video', 4.25)).toBe(4.25);
+    expect(normalizeFrameDuration(2.1, configuration, 'video', 4.25)).toBe(2.1);
+    expect(() => normalizeFrameDuration(4.3, configuration, 'video', 4.25)).toThrow('4.25');
   });
 });

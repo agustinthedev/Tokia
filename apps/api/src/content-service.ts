@@ -4,8 +4,8 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { pinterestImageCandidates } from '@tokia/shared';
-import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, frameRoles, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
-import { contentDirectory, createThumbnail, downloadSource, MediaProcessingError, normalizeImage, renderSlideshow, sha256File } from './content-media.js';
+import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameDuration, frameRoles, isMotionMedia, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
+import { contentDirectory, createThumbnail, downloadSource, MediaProcessingError, normalizeImage, renderSlideshow, sha256File, type SlideshowScene } from './content-media.js';
 import { generateNarrative, validateNarrative, type Narrative } from './narrative.js';
 
 type Row = Record<string, any>;
@@ -45,15 +45,19 @@ export function contentSnapshot(db: Database.Database, contentId: string): Row |
   const row = contentRow(db, contentId);
   if (!row) return undefined;
   const configuration = contentConfiguration(row);
-  const frames = (db.prepare(`SELECT f.*, a.external_asset_id, a.remote_image_url, a.remote_preview_url, a.remote_media_url, a.width AS source_width, a.height AS source_height, a.media_type AS source_media_type, a.title AS source_title, a.alt_text AS source_alt_text,
+  const frames = (db.prepare(`SELECT f.*, a.external_asset_id, a.remote_image_url, a.remote_preview_url, a.remote_media_url, a.width AS source_width, a.height AS source_height, a.duration_seconds AS source_duration_seconds, a.media_type AS source_media_type, a.title AS source_title, a.alt_text AS source_alt_text,
     COALESCE(c.local_title, c.name) AS source_collection_name
     FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id
     LEFT JOIN collection_assets ca ON ca.asset_id = a.id LEFT JOIN collections c ON c.id = ca.collection_id
-    WHERE f.content_id = ? GROUP BY f.id ORDER BY f.position`).all(contentId) as Row[]).map((frame) => ({
-      id: frame.id, position: frame.position, role: frame.source_media_type && frame.role !== 'cta' ? `${frame.role} (${frame.source_media_type === 'video' ? 'video' : 'image'})` : frame.role, headline: frame.headline, body: frame.body,
-      textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), settings: parseJson(frame.settings_json, {}),
-      sourceMedia: frame.source_media_id ? { id: frame.source_media_id, externalId: frame.external_asset_id, imageUrl: frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url, previewUrl: frame.remote_preview_url, mediaUrl: frame.remote_media_url ?? frame.remote_preview_url ?? frame.remote_image_url, width: frame.source_width, height: frame.source_height, mediaType: frame.source_media_type, title: frame.source_title, altText: frame.source_alt_text, collectionName: frame.source_collection_name } : null
-    }));
+    WHERE f.content_id = ? GROUP BY f.id ORDER BY f.position`).all(contentId) as Row[]).map((frame) => {
+      const settings = parseJson<Row>(frame.settings_json, {});
+      const durationSeconds = row.type === 'video_slideshow' ? effectiveFrameDuration(settings.durationSeconds, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
+      return {
+        id: frame.id, position: frame.position, role: frame.role, headline: frame.headline, body: frame.body,
+        durationSeconds, textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), settings,
+        sourceMedia: frame.source_media_id ? { id: frame.source_media_id, externalId: frame.external_asset_id, imageUrl: frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url, previewUrl: frame.remote_preview_url, mediaUrl: frame.remote_media_url ?? frame.remote_preview_url ?? frame.remote_image_url, width: frame.source_width, height: frame.source_height, durationSeconds: frame.source_duration_seconds, mediaType: frame.source_media_type, title: frame.source_title, altText: frame.source_alt_text, collectionName: frame.source_collection_name } : null
+      };
+    });
   const assets = (db.prepare('SELECT id, frame_id, asset_type, variant, status, mime_type, width, height, duration_ms, sha256, metadata_json, created_at FROM content_assets WHERE content_id = ? ORDER BY created_at DESC').all(contentId) as Row[]).map((asset) => ({
     id: asset.id, frameId: asset.frame_id, assetType: asset.asset_type, variant: asset.variant, status: asset.status, mimeType: asset.mime_type,
     width: asset.width, height: asset.height, durationMs: asset.duration_ms, sha256: asset.sha256, metadata: parseJson(asset.metadata_json, {}), createdAt: asset.created_at,
@@ -107,6 +111,15 @@ export function updateContent(db: Database.Database, contentId: string, body: Ro
       const insert = db.prepare('INSERT INTO content_frames(id, content_id, position, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
       for (const role of roles) insert.run(id(), contentId, role.position, role.role, timestamp, timestamp);
     }
+    if (type === 'video_slideshow' && current.video.secondsPerImage !== next.video.secondsPerImage) {
+      const frames = db.prepare(`SELECT f.id, f.settings_json, a.media_type, a.duration_seconds FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id WHERE f.content_id = ?`).all(contentId) as Row[];
+      for (const frame of frames) {
+        const frameSettings = parseJson<Row>(frame.settings_json, {});
+        if (frameSettings.durationCustomized) continue;
+        frameSettings.durationSeconds = defaultFrameDuration(next, frame.media_type, frame.duration_seconds);
+        db.prepare('UPDATE content_frames SET settings_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(frameSettings), timestamp, frame.id);
+      }
+    }
   })();
   return contentSnapshot(db, contentId)!;
 }
@@ -159,20 +172,27 @@ async function runNarrativeJob(db: Database.Database, job: Row, settings: Settin
 async function renderContent(db: Database.Database, contentId: string, variant: 'preview' | 'final', settings: Settings): Promise<Row> {
   const row = contentRow(db, contentId); if (!row) throw new ContentValidationError('CONTENT_NOT_FOUND', 'Content item not found.');
   const configuration = contentConfiguration(row); const directory = contentDirectory(settings.contentStorageDirectory, contentId);
-  const frames = db.prepare('SELECT f.*, a.remote_image_url, a.remote_media_url, a.remote_preview_url FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id WHERE f.content_id = ? ORDER BY f.position').all(contentId) as Row[];
+  const frames = db.prepare('SELECT f.*, a.remote_image_url, a.remote_media_url, a.remote_preview_url, a.media_type AS source_media_type, a.duration_seconds AS source_duration_seconds FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id WHERE f.content_id = ? ORDER BY f.position').all(contentId) as Row[];
   if (frames.some((frame) => !frame.source_media_id)) throw new ContentValidationError('MISSING_SOURCE_IMAGE', 'Select an image for every frame before generating a preview.');
   if (variant === 'preview') db.prepare('DELETE FROM content_assets WHERE content_id = ? AND variant = \'preview\'').run(contentId);
   if (variant === 'final') db.prepare('DELETE FROM content_assets WHERE content_id = ? AND variant = \'final\'').run(contentId);
   const renderedPaths: string[] = [];
+  const scenes: SlideshowScene[] = [];
   const timestamp = now();
   for (let index = 0; index < frames.length; index += 1) {
-    const frame = frames[index]!; const sourceUrl = String(frame.remote_image_url ?? frame.remote_media_url ?? frame.remote_preview_url ?? '');
+    const frame = frames[index]!; const motionSource = row.type === 'video_slideshow' && isMotionMedia(frame.source_media_type) && frame.remote_media_url;
+    const sourceUrl = String(motionSource ? frame.remote_media_url : frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url ?? '');
     if (!sourceUrl) throw new MediaProcessingError('SOURCE_MEDIA_MISSING', `Source media is missing for frame ${index + 1}.`);
     const sourceKey = String(frame.source_media_id).replace(/[^a-zA-Z0-9_-]/g, '');
+    const frameSettings = parseJson<Row>(frame.settings_json, {});
+    const durationSeconds = row.type === 'video_slideshow' ? effectiveFrameDuration(frameSettings.durationSeconds, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
+    const sourcePath = motionSource ? path.join(directory, `motion-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.media`) : null;
+    if (sourcePath && !fs.existsSync(sourcePath)) await downloadSource(sourceUrl, sourcePath);
     const normalizedPath = path.join(directory, `source-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.png`);
     if (!fs.existsSync(normalizedPath)) {
       const downloadPath = path.join(directory, `download-${String(index + 1).padStart(2, '0')}`);
-      await downloadBestSource(sourceUrl, downloadPath);
+      if (sourcePath) await fsp.copyFile(sourcePath, downloadPath);
+      else await downloadBestSource(sourceUrl, downloadPath);
       await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: downloadPath, outputPath: normalizedPath, configuration });
       await fsp.rm(downloadPath, { force: true });
       const sourceHash = await sha256File(normalizedPath);
@@ -183,21 +203,26 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
     const outputPath = path.join(directory, `${variant}-${String(index + 1).padStart(2, '0')}.png`);
     const dimensions = await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: normalizedPath, outputPath, configuration, text });
     renderedPaths.push(outputPath);
+    if (row.type === 'video_slideshow') {
+      scenes.push({ path: sourcePath ?? outputPath, mediaType: sourcePath ? 'video' : 'image', durationSeconds: durationSeconds ?? configuration.video.secondsPerImage, text: sourcePath ? text : null });
+    }
     const hash = await sha256File(outputPath);
     db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, sha256, metadata_json, created_at)
       VALUES (?, ?, ?, 'image', ?, 'ready', ?, 'image/png', ?, ?, ?, ?, ?)`).run(id(), contentId, frame.id, variant, outputPath, dimensions.width, dimensions.height, hash, JSON.stringify({ position: index + 1, role: frame.role }), timestamp);
   }
-  const first = renderedPaths[0]; if (!first) throw new MediaProcessingError('NO_RENDERED_ASSET', 'No rendered frame was created.');
+  let videoPath: string | null = null;
+  let video: { width: number; height: number; durationMs: number } | null = null;
+  if (row.type === 'video_slideshow') {
+    videoPath = path.join(directory, `${variant}.mp4`);
+    video = await renderSlideshow({ ffmpegPath: settings.ffmpegPath, scenes, outputPath: videoPath, configuration });
+    db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, duration_ms, sha256, metadata_json, created_at)
+      VALUES (?, ?, NULL, 'video', ?, 'ready', ?, 'video/mp4', ?, ?, ?, ?, ?, ?)`).run(id(), contentId, variant, videoPath, video.width, video.height, video.durationMs, await sha256File(videoPath), JSON.stringify({ fps: configuration.video.fps, secondsPerImage: configuration.video.secondsPerImage, sceneDurations: scenes.map((scene) => scene.durationSeconds), sourceTypes: scenes.map((scene) => scene.mediaType) }), timestamp);
+  }
+  const first = videoPath ?? renderedPaths[0]; if (!first) throw new MediaProcessingError('NO_RENDERED_ASSET', 'No rendered frame was created.');
   const thumbnailPath = path.join(directory, `${variant}-thumbnail.webp`);
   await createThumbnail({ ffmpegPath: settings.ffmpegPath, sourcePath: first, outputPath: thumbnailPath });
   db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, sha256, metadata_json, created_at)
     VALUES (?, ?, NULL, 'thumbnail', ?, 'ready', ?, 'image/webp', 320, 320, ?, ?, ?)`).run(id(), contentId, variant, thumbnailPath, await sha256File(thumbnailPath), JSON.stringify({}), timestamp);
-  if (row.type === 'video_slideshow') {
-    const videoPath = path.join(directory, `${variant}.mp4`);
-    const video = await renderSlideshow({ ffmpegPath: settings.ffmpegPath, imagePaths: renderedPaths, outputPath: videoPath, configuration });
-    db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, duration_ms, sha256, metadata_json, created_at)
-      VALUES (?, ?, NULL, 'video', ?, 'ready', ?, 'video/mp4', ?, ?, ?, ?, ?, ?)`).run(id(), contentId, variant, videoPath, video.width, video.height, video.durationMs, await sha256File(videoPath), JSON.stringify({ fps: configuration.video.fps, secondsPerImage: configuration.video.secondsPerImage }), timestamp);
-  }
   if (variant === 'preview') db.prepare('UPDATE content_items SET preview_version = preview_version + 1, status = \'preview_ready\', error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ?').run(now(), contentId);
   return { variant, frameCount: frames.length, files: renderedPaths.length };
 }

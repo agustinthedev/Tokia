@@ -7,6 +7,8 @@ export type ContentStatus = typeof CONTENT_STATUSES[number];
 export const TEXT_MODES = ['none', 'cover_only', 'headline_only', 'headline_and_body', 'custom_per_slide'] as const;
 export type TextMode = typeof TEXT_MODES[number];
 export const MAX_TOTAL_FRAMES = 100;
+export const MIN_FRAME_DURATION_SECONDS = 0.1;
+export const MAX_IMAGE_FRAME_DURATION_SECONDS = 30;
 
 export interface ContentConfiguration {
   sourceCollectionIds: string[];
@@ -99,6 +101,8 @@ export function mergeConfiguration(input: unknown, projectDefaults?: unknown): C
   merged.sourceCollectionIds = Array.isArray(source.sourceCollectionIds) ? source.sourceCollectionIds.filter((value): value is string => typeof value === 'string') : Array.isArray(defaults.sourceCollectionIds) ? defaults.sourceCollectionIds.filter((value): value is string => typeof value === 'string') : [];
   merged.visual = { ...DEFAULT_CONFIGURATION.visual, ...(defaults.visual as object ?? {}), ...(source.visual as object ?? {}) };
   merged.video = { ...DEFAULT_CONFIGURATION.video, ...(defaults.video as object ?? {}), ...(source.video as object ?? {}) };
+  const secondsPerImage = Number(merged.video.secondsPerImage);
+  merged.video.secondsPerImage = Number.isFinite(secondsPerImage) ? Math.max(0.5, Math.min(MAX_IMAGE_FRAME_DURATION_SECONDS, secondsPerImage)) : DEFAULT_CONFIGURATION.video.secondsPerImage;
   merged.totalFrames = Number.isInteger(merged.totalFrames) ? Math.max(1, Math.min(MAX_TOTAL_FRAMES, merged.totalFrames)) : DEFAULT_CONFIGURATION.totalFrames;
   merged.includeCover = Boolean(merged.includeCover);
   merged.includeCta = Boolean(merged.includeCta);
@@ -131,6 +135,42 @@ export function slugify(value: string): string {
 
 export class ContentValidationError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = 'ContentValidationError'; }
+}
+
+export function isMotionMedia(mediaType: unknown): boolean {
+  return mediaType === 'video' || mediaType === 'animated';
+}
+
+export function frameDurationLimit(mediaType: unknown, originalDurationSeconds: unknown): number {
+  const original = Number(originalDurationSeconds);
+  return isMotionMedia(mediaType) && Number.isFinite(original) && original > 0 ? original : MAX_IMAGE_FRAME_DURATION_SECONDS;
+}
+
+export function defaultFrameDuration(configuration: ContentConfiguration, mediaType?: unknown, originalDurationSeconds?: unknown): number {
+  if (isMotionMedia(mediaType)) {
+    const original = Number(originalDurationSeconds);
+    if (Number.isFinite(original) && original > 0) return Math.round(original * 100) / 100;
+  }
+  return Math.round(Math.max(0.5, Math.min(MAX_IMAGE_FRAME_DURATION_SECONDS, Number(configuration.video.secondsPerImage) || DEFAULT_CONFIGURATION.video.secondsPerImage)) * 100) / 100;
+}
+
+export function effectiveFrameDuration(value: unknown, configuration: ContentConfiguration, mediaType?: unknown, originalDurationSeconds?: unknown): number {
+  const maximum = frameDurationLimit(mediaType, originalDurationSeconds);
+  const minimum = Math.min(MIN_FRAME_DURATION_SECONDS, maximum);
+  const fallback = defaultFrameDuration(configuration, mediaType, originalDurationSeconds);
+  const duration = Number(value);
+  return Math.round(Math.max(minimum, Math.min(maximum, Number.isFinite(duration) ? duration : fallback)) * 100) / 100;
+}
+
+export function normalizeFrameDuration(value: unknown, configuration: ContentConfiguration, mediaType?: unknown, originalDurationSeconds?: unknown): number {
+  const duration = Number(value);
+  const maximum = frameDurationLimit(mediaType, originalDurationSeconds);
+  const minimum = Math.min(MIN_FRAME_DURATION_SECONDS, maximum);
+  if (!Number.isFinite(duration) || duration < minimum || duration > maximum) {
+    const suffix = isMotionMedia(mediaType) && Number.isFinite(Number(originalDurationSeconds)) ? ` The source video is ${maximum.toFixed(2)} seconds long.` : '';
+    throw new ContentValidationError('INVALID_FRAME_DURATION', `Frame duration must be between ${minimum.toFixed(2)} and ${maximum.toFixed(2)} seconds.${suffix}`);
+  }
+  return Math.round(duration * 100) / 100;
 }
 
 export function assertContentType(value: unknown): ContentType {

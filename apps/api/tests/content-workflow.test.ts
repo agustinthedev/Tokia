@@ -74,7 +74,14 @@ describe('project and content workflow', () => {
     expect(finalDownload.body).toContain('slide-05.png');
     const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 3, includeCover: true, includeCta: false, textMode: 'none', video: { secondsPerImage: 0.5, fps: 24, outputResolution: '720p' } } } });
     const videoId = videoDraft.json().id as string;
-    await app.inject({ method: 'POST', url: `/api/content/${videoId}/images/select`, headers, payload: {} });
+    const videoSelectedResponse = await app.inject({ method: 'POST', url: `/api/content/${videoId}/images/select`, headers, payload: {} });
+    expect(videoSelectedResponse.json().frames.map((frame: { durationSeconds: number }) => frame.durationSeconds)).toEqual([0.5, 0.5, 0.5]);
+    const videoDurations = [0.2, 0.4, 0.6];
+    for (let index = 0; index < videoSelectedResponse.json().frames.length; index += 1) {
+      const frame = videoSelectedResponse.json().frames[index];
+      const updatedFrame = await app.inject({ method: 'PATCH', url: `/api/content/${videoId}/frames/${frame.id}`, headers, payload: { durationSeconds: videoDurations[index] } });
+      expect(updatedFrame.statusCode).toBe(200);
+    }
     await app.inject({ method: 'POST', url: `/api/content/${videoId}/narrative`, headers, payload: {} });
     await waitFor(async () => Boolean((await app!.inject({ method: 'GET', url: `/api/content/${videoId}` })).json().narrative), 5_000);
     await app.inject({ method: 'POST', url: `/api/content/${videoId}/preview`, headers, payload: {} });
@@ -84,7 +91,9 @@ describe('project and content workflow', () => {
       return state.status === 'preview_ready';
     }, 20_000);
     const videoPreview = (await app.inject({ method: 'GET', url: `/api/content/${videoId}` })).json();
-    expect(videoPreview.assets.some((asset: { variant: string; mimeType: string }) => asset.variant === 'preview' && asset.mimeType === 'video/mp4')).toBe(true);
+    const videoAsset = videoPreview.assets.find((asset: { variant: string; mimeType: string }) => asset.variant === 'preview' && asset.mimeType === 'video/mp4');
+    expect(videoAsset).toBeTruthy();
+    expect(videoAsset.metadata.sceneDurations).toEqual(videoDurations);
     const archivedVideo = await app.inject({ method: 'DELETE', url: `/api/content/${videoId}`, headers });
     expect(archivedVideo.statusCode).toBe(200);
     expect(archivedVideo.json().status).toBe('archived');
@@ -110,7 +119,8 @@ describe('project and content workflow', () => {
         mediaType: 'video',
         mimeType: 'video/mp4',
         width: 736,
-        height: 1104
+        height: 1104,
+        durationSeconds: 4.2
       }]
     } });
     const collectionId = imported.json().collection.id as string;
@@ -121,7 +131,18 @@ describe('project and content workflow', () => {
     const selected = await app.inject({ method: 'POST', url: `/api/content/${draft.json().id}/images/select`, headers, payload: { mediaIds: [videoAsset.id] } });
     expect(selected.statusCode).toBe(200);
     expect(selected.json().frames[0].sourceMedia).toMatchObject({ mediaType: 'video', width: 736, height: 1104 });
-    expect(selected.json().frames[0].role).toBe('title_and_summary (video)');
+    expect(selected.json().frames[0].role).toBe('title_and_summary');
+
+    const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 1, includeCover: false, includeCta: false, textMode: 'none', video: { secondsPerImage: 1.5 } } } });
+    const videoContentId = videoDraft.json().id as string;
+    const videoContentSelection = await app.inject({ method: 'POST', url: `/api/content/${videoContentId}/images/select`, headers, payload: { mediaIds: [videoAsset.id] } });
+    expect(videoContentSelection.json().frames[0].durationSeconds).toBe(4.2);
+    const durationUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 2.1 } });
+    expect(durationUpdate.statusCode).toBe(200);
+    expect(durationUpdate.json().frames[0].durationSeconds).toBe(2.1);
+    const invalidDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 4.3 } });
+    expect(invalidDuration.statusCode).toBe(400);
+    expect(invalidDuration.json().error.code).toBe('INVALID_FRAME_DURATION');
   });
 });
 
