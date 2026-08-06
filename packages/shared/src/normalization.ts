@@ -96,7 +96,11 @@ function identityKey(provider: Provider, externalId: string | null, canonicalUrl
 export function normalizePin(input: {
   externalId?: string | null;
   pinUrl?: string | null;
-  imageUrl: string;
+  imageUrl?: string | null;
+  mediaUrl?: string | null;
+  mediaType?: 'image' | 'video' | 'animated' | null;
+  mimeType?: string | null;
+  durationSeconds?: number | null;
   previewUrl?: string | null;
   imageVariants?: ImageVariant[];
   title?: string | null;
@@ -110,14 +114,15 @@ export function normalizePin(input: {
   const extractedId = extractPinterestPinId(input.pinUrl);
   const externalId = cleanOptionalText(input.externalId) ?? extractedId;
   const canonicalUrl = pinUrl;
-  const imageUrl = normalizeRemoteUrl(input.imageUrl);
-  if (!imageUrl) throw new Error('Pin imageUrl must be a valid http(s) URL');
+  const mediaUrl = normalizeRemoteUrl(input.mediaUrl ?? input.imageUrl);
+  const imageUrl = normalizeRemoteUrl(input.imageUrl) ?? mediaUrl;
+  if (!mediaUrl || !imageUrl) throw new Error('Pin imageUrl or mediaUrl must be a valid http(s) URL');
   const imageVariants: ImageVariant[] = [];
   for (const variant of input.imageVariants ?? []) {
     const url = normalizeRemoteUrl(variant.url);
     if (url) imageVariants.push({ url, width: variant.width ?? null, height: variant.height ?? null });
   }
-  const normalizedImageKey = normalizePinimgImageKey(imageUrl);
+  const normalizedImageKey = normalizePinimgImageKey(input.imageUrl ?? null);
   if (!externalId && !canonicalUrl && !normalizedImageKey) throw new Error('Pin has no normalized identity');
   return {
     ...input,
@@ -127,6 +132,10 @@ export function normalizePin(input: {
     normalizedImageKey,
     identityKey: identityKey(provider, externalId, canonicalUrl, normalizedImageKey),
     imageUrl,
+    mediaUrl,
+    mediaType: input.mediaType ?? (/^video\//i.test(input.mimeType ?? '') ? 'video' : 'image'),
+    mimeType: input.mimeType ?? null,
+    durationSeconds: input.durationSeconds ?? null,
     previewUrl: normalizeRemoteUrl(input.previewUrl),
     imageVariants,
     title: cleanOptionalText(input.title),

@@ -267,4 +267,40 @@ La suite cubre normalización de URLs, IDs, claves de imágenes, primera importa
 
 ## Alcance futuro
 
+## Phase 2: local media workspace
+
+Phase 2 adds `apps/web`, a React + Vite application connected to the Fastify API. It keeps the local-first boundary intact: the browser talks to the API, and only the API opens SQLite. The interface is a dark, responsive media workspace with a collapsible navigation shell, dashboard, collection galleries, global asset browsing, project management, import diagnostics, global search, and local settings.
+
+Collections and projects are intentionally different. A collection is an imported or reusable source board with global asset memberships and import history. A project references one or more collections through `project_collections`; it never copies collection assets. This leaves room for future weighting, media-type rules, usage history, randomized selection, and manual replacement.
+
+### Phase 2 development
+
+Run the API and web app in separate terminals:
+
+```bash
+npm run dev
+npm run dev:web
+```
+
+The API runs at `http://127.0.0.1:3000`; the Vite app runs at `http://127.0.0.1:5173`. If the local token differs from the example value, set `VITE_INTEGRATION_TOKEN` before starting the web app. The API allows the Vite origins through `CORS_ALLOWED_ORIGINS`.
+
+Build everything with:
+
+```bash
+npm run build
+npm run typecheck
+npm test
+npm run migrate
+```
+
+Phase 2 migration `apps/api/migrations/002_phase2.sql` adds separate local collection metadata, cover references, lifecycle timestamps, media type/video metadata, projects, and the project-to-collection relationship. It is additive and safe to run against the Phase 1 SQLite database.
+
+### Phase 2 API surface
+
+The UI uses `GET /api/dashboard`, `/api/settings`, `/api/search`, collection and asset list/detail routes, project CRUD and project-collection association routes, and import-run list/detail routes. Mutation routes retain the local integration token boundary. Image cards use lazy remote previews. Video cards use poster-first rendering and an explicit play affordance; the detail drawer attempts defensive playback and preserves an open-original fallback when a remote host blocks embedding or a URL is unavailable.
+
+### Deferred generation layer
+
+The project schema intentionally stores extensible `config_json` and a relationship row per collection. Weighted selection, recency avoidance, asset usage history, target-format crop previews, text-slide safe areas, overlay rules, and manual asset replacement are extension points, not fake controls in this phase.
+
 La tabla de unión permite que una futura entidad `projects` consuma varias colecciones sin acoplar proyectos al origen Pinterest. Las partes más frágiles son la detección de metadata/board ID y los selectores del DOM Pinterest; el API y la deduplicación quedan aislados en `packages/shared` y `apps/api` para que esos cambios no contaminen el almacenamiento.
