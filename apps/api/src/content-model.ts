@@ -6,6 +6,7 @@ export const CONTENT_STATUSES = ['draft', 'preview_generating', 'preview_ready',
 export type ContentStatus = typeof CONTENT_STATUSES[number];
 export const TEXT_MODES = ['none', 'cover_only', 'headline_only', 'headline_and_body', 'custom_per_slide'] as const;
 export type TextMode = typeof TEXT_MODES[number];
+export const MAX_TOTAL_FRAMES = 100;
 
 export interface ContentConfiguration {
   sourceCollectionIds: string[];
@@ -98,7 +99,7 @@ export function mergeConfiguration(input: unknown, projectDefaults?: unknown): C
   merged.sourceCollectionIds = Array.isArray(source.sourceCollectionIds) ? source.sourceCollectionIds.filter((value): value is string => typeof value === 'string') : Array.isArray(defaults.sourceCollectionIds) ? defaults.sourceCollectionIds.filter((value): value is string => typeof value === 'string') : [];
   merged.visual = { ...DEFAULT_CONFIGURATION.visual, ...(defaults.visual as object ?? {}), ...(source.visual as object ?? {}) };
   merged.video = { ...DEFAULT_CONFIGURATION.video, ...(defaults.video as object ?? {}), ...(source.video as object ?? {}) };
-  merged.totalFrames = Number.isInteger(merged.totalFrames) ? Math.max(1, Math.min(30, merged.totalFrames)) : DEFAULT_CONFIGURATION.totalFrames;
+  merged.totalFrames = Number.isInteger(merged.totalFrames) ? Math.max(1, Math.min(MAX_TOTAL_FRAMES, merged.totalFrames)) : DEFAULT_CONFIGURATION.totalFrames;
   merged.includeCover = Boolean(merged.includeCover);
   merged.includeCta = Boolean(merged.includeCta);
   merged.textMode = TEXT_MODES.includes(merged.textMode) ? merged.textMode : DEFAULT_CONFIGURATION.textMode;

@@ -10,6 +10,12 @@ describe('content model and narrative contract', () => {
     expect(frameRoles('single_image', configuration)).toEqual([{ position: 1, role: 'title_and_summary' }]);
   });
 
+  it('keeps video frame counts above the former 30-frame limit', () => {
+    const configuration = mergeConfiguration({ totalFrames: 35, includeCover: true, includeCta: true });
+    expect(configuration.totalFrames).toBe(35);
+    expect(frameRoles('video_slideshow', configuration)).toHaveLength(35);
+  });
+
   it('validates ordered roles and text-mode restrictions', () => {
     const configuration = mergeConfiguration({ totalFrames: 3, includeCover: true, includeCta: false, textMode: 'cover_only' });
     const roles = frameRoles('carousel', configuration);
