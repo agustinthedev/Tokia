@@ -23,6 +23,7 @@ body {
   color: var(--text);
   background: radial-gradient(circle at 12% 0%, #f8fbff 0, transparent 28%), #dfe7f0;
 }
+body:not(.options) { overflow: hidden; }
 main {
   margin: 8px;
   padding: 20px;
@@ -132,6 +133,17 @@ input { width: 100%; min-height: 38px; padding: 9px 11px; border: 1px solid var(
 input:hover { border-color: #b7c9e1; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .options form > .button-primary { justify-self: start; min-width: 140px; }
+
+body:not(.options) main { padding: 16px; }
+body:not(.options) .intro { margin: 18px 0 12px; }
+body:not(.options) .intro h1 { font-size: 22px; }
+body:not(.options) .status-line { min-height: 22px; margin-bottom: 6px; }
+body:not(.options) .card { margin: 6px 0; padding: 11px; }
+body:not(.options) .progress-card { padding-bottom: 12px; }
+body:not(.options) .actions { gap: 7px; margin-top: 10px; }
+body:not(.options) button { min-height: 33px; padding: 8px; }
+body:not(.options) .utility-actions { margin-top: 8px; }
+body:not(.options) .message { min-height: 13px; margin-top: 6px; }
 
 @media (max-width: 600px) {
   .options { min-width: 360px; }
