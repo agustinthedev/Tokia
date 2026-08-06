@@ -292,6 +292,47 @@ h1, h2, h3, .brand { font-family: 'Space Grotesk', 'DM Sans', ui-sans-serif, sys
 .asset-load-more-button { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; padding: 12px 18px; }
 .asset-load-more-button:hover { color: var(--blue); }
 
+/* Keep project wizard controls consistent with the light workspace UI. */
+.form-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 38px 0 12px;
+  border: 1px solid #dfe6ee;
+  border-radius: 11px;
+  color: var(--text);
+  background-color: #fff;
+  background-image: linear-gradient(45deg, transparent 50%, #7b8ba1 50%), linear-gradient(135deg, #7b8ba1 50%, transparent 50%);
+  background-position: calc(100% - 17px) 18px, calc(100% - 12px) 18px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  font-size: 12px;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.form-field select:hover { border-color: #b7c9e1; }
+.form-field select:focus { border-color: #9db8f4; box-shadow: 0 0 0 3px rgba(46,108,246,.08); }
+.form-field input[type="color"] {
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid #dfe6ee;
+  border-radius: 11px;
+  background: #fff;
+  cursor: pointer;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.form-field input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.form-field input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 7px; }
+.form-field input[type="color"]::-moz-color-swatch { border: 0; border-radius: 7px; }
+.form-field input[type="color"]:hover { border-color: #b7c9e1; }
+.form-field input[type="color"]:focus { border-color: #9db8f4; box-shadow: 0 0 0 3px rgba(46,108,246,.08); }
+
 .settings-tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; padding: 5px; border: 1px solid var(--border); border-radius: 13px; background: #f1f5f9; width: fit-content; max-width: 100%; overflow-x: auto; }
 .settings-tabs button { display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); padding: 9px 13px; font-size: 12px; font-weight: 650; white-space: nowrap; }
 .settings-tabs button:hover { color: var(--text); background: #fff; }
