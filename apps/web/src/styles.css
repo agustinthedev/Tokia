@@ -292,6 +292,13 @@ h1, h2, h3, .brand { font-family: 'Space Grotesk', 'DM Sans', ui-sans-serif, sys
 .asset-load-more-button { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; padding: 12px 18px; }
 .asset-load-more-button:hover { color: var(--blue); }
 
+/* Match the modal scrollbar to the workspace scrollbar. */
+.modal { scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #c2cfdf transparent; }
+.modal::-webkit-scrollbar { width: 10px; }
+.modal::-webkit-scrollbar-track { background: transparent; margin: 8px 0; }
+.modal::-webkit-scrollbar-thumb { background: #c2cfdf; border: 3px solid transparent; border-radius: 999px; background-clip: content-box; }
+.modal::-webkit-scrollbar-thumb:hover { background: #8fa5c0; border-width: 2px; }
+
 /* Keep project wizard controls consistent with the light workspace UI. */
 .form-field select {
   width: 100%;
