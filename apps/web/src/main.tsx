@@ -66,7 +66,30 @@ function MediaPreview({ asset, detail = false, onImageLoad }: { asset: Asset; de
 
 function AssetCard({ asset, onOpen, selected = false, onSelect }: { asset: Asset; onOpen: () => void; selected?: boolean; onSelect?: () => void }): ReactElement { const [dimensions, setDimensions] = useState<{ width?: number; height?: number }>({}); const title = assetDisplayTitle(asset); return <article className={`asset-card ${selected ? 'is-selected' : ''}`}><button className="asset-visual-button" onClick={onOpen} aria-label={`Open ${title}`}><MediaPreview asset={asset} onImageLoad={(size) => setDimensions(size)} /></button><div className="asset-card-body"><div className="asset-card-title" title={title}>{title}</div><div className="asset-card-meta"><span>{asset.mediaType === 'video' ? <Icon name="video" /> : <Icon name="image" />}{asset.mediaType}</span>{dimensions.width && dimensions.height ? <span>{dimensions.width} × {dimensions.height}</span> : null}{onSelect && <button className={`select-dot ${selected ? 'selected' : ''}`} onClick={(event) => { event.stopPropagation(); onSelect(); }} aria-label={selected ? 'Deselect asset' : 'Select asset'}>{selected ? '✓' : ''}</button>}</div></div></article>; }
 
-function AssetGrid({ assets, loading, error, onOpen, empty = 'No media matches these filters.', selectedIds, onSelect }: { assets: Asset[]; loading: boolean; error: string | null; onOpen: (asset: Asset) => void; empty?: string; selectedIds?: Set<string>; onSelect?: (id: string) => void }): ReactElement { if (loading) return <div className="asset-grid">{Array.from({ length: 8 }).map((_, index) => <div className="skeleton asset-skeleton" key={index} />)}</div>; if (error) return <ErrorState message={error} />; if (!assets.length) return <EmptyState icon="◈" title="Nothing here yet" message={empty} />; return <div className="asset-grid">{assets.map((asset) => <AssetCard key={asset.id} asset={asset} onOpen={() => onOpen(asset)} selected={selectedIds?.has(asset.id)} onSelect={onSelect ? () => onSelect(asset.id) : undefined} />)}</div>; }
+function getMasonryColumnCount(): number {
+  if (typeof window === 'undefined') return 5;
+  return window.innerWidth <= 580 ? 2 : window.innerWidth <= 1200 ? 4 : 5;
+}
+
+function useMasonryColumnCount(): number {
+  const [columnCount, setColumnCount] = useState(getMasonryColumnCount);
+  useEffect(() => {
+    const handleResize = (): void => setColumnCount(getMasonryColumnCount());
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  return columnCount;
+}
+
+function AssetGrid({ assets, loading, error, onOpen, empty = 'No media matches these filters.', selectedIds, onSelect }: { assets: Asset[]; loading: boolean; error: string | null; onOpen: (asset: Asset) => void; empty?: string; selectedIds?: Set<string>; onSelect?: (id: string) => void }): ReactElement {
+  const columnCount = useMasonryColumnCount();
+  const columns = Array.from({ length: columnCount }, (_, columnIndex) => assets.filter((_, assetIndex) => assetIndex % columnCount === columnIndex));
+  const renderCard = (asset: Asset): ReactElement => <AssetCard key={asset.id} asset={asset} onOpen={() => onOpen(asset)} selected={selectedIds?.has(asset.id)} onSelect={onSelect ? () => onSelect(asset.id) : undefined} />;
+  if (loading) return <div className="asset-grid" style={{ '--asset-columns': columnCount } as CSSProperties}>{columns.map((_, columnIndex) => <div className="asset-grid-column" key={columnIndex}>{Array.from({ length: Math.ceil(8 / columnCount) }).map((__, skeletonIndex) => <div className="skeleton asset-skeleton" key={skeletonIndex} />)}</div>)}</div>;
+  if (error) return <ErrorState message={error} />;
+  if (!assets.length) return <EmptyState icon="◈" title="Nothing here yet" message={empty} />;
+  return <div className="asset-grid" style={{ '--asset-columns': columnCount } as CSSProperties}>{columns.map((column, columnIndex) => <div className="asset-grid-column" key={columnIndex}>{column.map(renderCard)}</div>)}</div>;
+}
 
 function EmptyState({ icon, title, message, action }: { icon: string; title: string; message: string; action?: ReactNode }): ReactElement { return <div className="empty-state"><div className="empty-icon">{icon}</div><h3>{title}</h3><p>{message}</p>{action}</div>; }
 function ErrorState({ message, retry }: { message: string; retry?: () => void }): ReactElement { return <div className="error-state"><div className="error-icon">!</div><div><strong>Something went wrong</strong><p>{message}</p>{retry && <Button onClick={retry}>Try again</Button>}</div></div>; }

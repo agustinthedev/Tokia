@@ -307,8 +307,8 @@ h1, h2, h3, .brand { font-family: 'Space Grotesk', 'DM Sans', ui-sans-serif, sys
 .topbar { flex: 0 0 auto; position: sticky; top: 0; z-index: 10; }
 .page-content { flex: 0 0 auto; width: 100%; max-width: none; min-height: 0; margin: 0; overflow: visible; padding-left: 42px; padding-right: 42px; }
 
-/* A regular grid keeps already-visible media in place when another page is appended. */
-.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; align-items: start; }
+/* Stable masonry: each column keeps its existing cards when more media is appended. */
+.asset-grid { display: grid; grid-template-columns: repeat(var(--asset-columns, 5), minmax(0, 1fr)); gap: 14px; align-items: start; }
+.asset-grid-column { display: grid; align-content: start; gap: 14px; min-width: 0; }
 .asset-card { margin-bottom: 0; }
-@media (max-width: 1200px) { .asset-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); } }
-@media (max-width: 580px) { .asset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } }
+@media (max-width: 580px) { .asset-grid, .asset-grid-column { gap: 8px; } }
