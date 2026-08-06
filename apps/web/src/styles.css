@@ -442,7 +442,8 @@ p, .section-header p, .project-card p, .project-detail-hero p, .panel-caption, .
 }
 
 .app-shell {
-  width: min(1450px, calc(100vw - 32px));
+  width: calc(100vw - 32px);
+  max-width: none;
   height: calc(100vh - 32px);
   margin: 16px auto;
   border-radius: 26px;
