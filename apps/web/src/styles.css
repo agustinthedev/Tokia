@@ -410,3 +410,66 @@ h1, h2, h3, .brand { font-family: 'Space Grotesk', 'DM Sans', ui-sans-serif, sys
   .content-list-row { grid-template-columns: 1fr; }
   .content-list-actions { justify-content: flex-end; padding: 0 6px 4px 0; }
 }
+
+/* Typography and SaaS shell polish: use the loaded weights consistently and keep the workspace airy. */
+:root {
+  --font-ui: "DM Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Space Grotesk", "DM Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+html { font-size: 16px; }
+body, button, input, select, textarea {
+  font-family: var(--font-ui);
+  font-weight: 500;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+h1, h2, h3, .brand {
+  font-family: var(--font-display);
+  font-weight: 600;
+  text-rendering: optimizeLegibility;
+}
+h1 { font-weight: 700; }
+h2, h3 { font-weight: 600; }
+p, .section-header p, .project-card p, .project-detail-hero p, .panel-caption, .result-count, .muted {
+  font-weight: 400;
+}
+.button, .nav-item, .content-action-button, .status, .form-field > span, th {
+  font-weight: 600;
+}
+.stat-value, .project-metrics b, .content-list-copy strong, .asset-card-title, .recent-asset strong, .rank-info strong, .run-row strong, .linked-collection strong {
+  font-weight: 700;
+}
+
+.app-shell {
+  width: min(1450px, calc(100vw - 32px));
+  height: calc(100vh - 32px);
+  margin: 16px auto;
+  border-radius: 26px;
+  box-shadow: 0 24px 72px rgba(52, 72, 108, .18), 0 2px 5px rgba(52, 72, 108, .04);
+}
+.sidebar { width: 244px; padding: 29px 16px 20px; }
+.brand { font-size: 19px; font-weight: 700; }
+.nav-item { min-height: 44px; }
+.topbar { height: 82px; padding: 0 40px; }
+.page-content { padding: 38px 44px 72px; }
+.section-header { margin-bottom: 30px; }
+.section-header h1 { letter-spacing: -.05em; }
+.section-header p { margin-top: 12px; line-height: 1.55; }
+.panel, .stats-grid, .collection-card, .asset-card, .project-card, .info-card, .table-card {
+  box-shadow: 0 10px 28px rgba(47, 67, 98, .055);
+}
+.panel-heading h2, .panel-heading h3 { letter-spacing: -.03em; }
+.stat-detail, .stat-label, .collection-stats, .collection-updated, .asset-card-meta, .content-list-copy span {
+  font-weight: 500;
+}
+.global-search, .toolbar select, .search-field, .form-field input, .form-field textarea, .form-field select {
+  font-weight: 500;
+}
+.global-search input, .search-field input { font-weight: 500; }
+
+@media (max-width: 860px) {
+  .app-shell { width: 100%; height: 100vh; margin: 0; border-radius: 0; }
+  .topbar { height: 76px; padding: 0 28px; }
+  .page-content { padding: 32px 28px 56px; }
+}
