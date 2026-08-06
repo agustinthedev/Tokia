@@ -4,7 +4,8 @@ import {
   normalizePin,
   normalizePinimgImageKey,
   normalizePinterestBoardUrl,
-  normalizePinterestPinUrl
+  normalizePinterestPinUrl,
+  chooseBestImageUrl
 } from './normalization.js';
 
 describe('Pinterest URL normalization', () => {
@@ -43,5 +44,20 @@ describe('Pinterest URL normalization', () => {
     });
     expect(pin.mediaUrl).toBeNull();
     expect(pin.imageUrl).toContain('poster.jpg');
+  });
+
+  it('promotes small Pinterest sources to the large source and scales dimensions', () => {
+    const pin = normalizePin({
+      externalId: 'small-source',
+      pinUrl: 'https://www.pinterest.com/pin/small-source/',
+      imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/photo.jpg',
+      width: 236,
+      height: 419
+    });
+    expect(chooseBestImageUrl(pin)).toMatchObject({
+      imageUrl: 'https://i.pinimg.com/736x/aa/bb/cc/photo.jpg',
+      width: 736,
+      height: 1307
+    });
   });
 });

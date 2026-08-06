@@ -79,6 +79,23 @@ describe('Pinterest ingestion', () => {
     expect(db!.prepare('SELECT COUNT(*) AS count FROM collection_assets').get()).toMatchObject({ count: 2 });
   });
 
+  it('stores the large source URL and never persists the small preview URL', async () => {
+    ({ db, app } = await setup());
+    await importPayload(app, payload({}, [pin('legacy-small', {
+      imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/legacy-small.jpg',
+      previewUrl: 'https://i.pinimg.com/236x/aa/bb/cc/legacy-small.jpg',
+      imageVariants: [],
+      width: 236,
+      height: 419
+    })]));
+    expect(db!.prepare('SELECT remote_image_url, remote_preview_url, width, height FROM assets WHERE external_asset_id = ?').get('legacy-small')).toMatchObject({
+      remote_image_url: 'https://i.pinimg.com/736x/aa/bb/cc/legacy-small.jpg',
+      remote_preview_url: null,
+      width: 736,
+      height: 1307
+    });
+  });
+
   it('reimports without duplicate rows, updates a renamed board, and preserves good metadata', async () => {
     ({ db, app } = await setup());
     await importPayload(app, payload());

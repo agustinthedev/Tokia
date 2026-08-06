@@ -14,8 +14,30 @@ const IMAGE_SIZE_SEGMENTS = new Set([
   '170x', '222x'
 ]);
 
+const FALLBACK_PINTEREST_IMAGE_WIDTH = 736;
+
 function isImageSizeSegment(value: string): boolean {
   return IMAGE_SIZE_SEGMENTS.has(value.toLowerCase()) || /^\d+x$/i.test(value);
+}
+
+function imageWidthFromUrl(value: string): number | null {
+  const parsed = parseUrl(value);
+  if (!parsed || parsed.hostname.toLowerCase() !== PINTEREST_IMAGE_HOST) return null;
+  const segment = parsed.pathname.split('/').filter(Boolean)[0] ?? '';
+  if (/^originals$/i.test(segment)) return Number.MAX_SAFE_INTEGER;
+  const width = segment.match(/^(\d+)x$/i)?.[1];
+  return width ? Number(width) : null;
+}
+
+function promoteToLargePinterestImage(value: string): string {
+  const parsed = parseUrl(value);
+  if (!parsed || parsed.hostname.toLowerCase() !== PINTEREST_IMAGE_HOST) return value;
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  const size = parts[0];
+  if (!size || !/^\d+x$/i.test(size) || Number(size.slice(0, -1)) >= FALLBACK_PINTEREST_IMAGE_WIDTH) return value;
+  parts[0] = `${FALLBACK_PINTEREST_IMAGE_WIDTH}x`;
+  parsed.pathname = `/${parts.join('/')}`;
+  return parsed.toString();
 }
 
 function parseUrl(value: string | null | undefined): URL | null {
@@ -152,13 +174,24 @@ export function chooseBestImageUrl(pin: NormalizedPin): { imageUrl: string; widt
     { url: pin.imageUrl, width: pin.width ?? null, height: pin.height ?? null },
     ...pin.imageVariants.map((variant) => ({ url: variant.url, width: variant.width ?? null, height: variant.height ?? null }))
   ];
-  candidates.sort((a, b) => (b.width ?? 0) - (a.width ?? 0));
+  candidates.sort((a, b) => Math.max(b.width ?? 0, imageWidthFromUrl(b.url) ?? 0) - Math.max(a.width ?? 0, imageWidthFromUrl(a.url) ?? 0));
   const best = candidates[0]!;
-  return { imageUrl: best.url, width: best.width, height: best.height };
+  const urlWidth = imageWidthFromUrl(best.url);
+  const sourceWidth = urlWidth === Number.MAX_SAFE_INTEGER ? null : Math.max(best.width ?? 0, urlWidth ?? 0) || null;
+  const shouldPromote = urlWidth !== null && urlWidth !== Number.MAX_SAFE_INTEGER && urlWidth < FALLBACK_PINTEREST_IMAGE_WIDTH;
+  const imageUrl = shouldPromote
+    ? promoteToLargePinterestImage(best.url)
+    : best.url;
+  const width = sourceWidth === null ? null : urlWidth === null ? sourceWidth : Math.max(sourceWidth, FALLBACK_PINTEREST_IMAGE_WIDTH);
+  const height = best.height && (!shouldPromote || (pin.width ?? 0) >= FALLBACK_PINTEREST_IMAGE_WIDTH)
+    ? best.height
+    : pin.width && pin.height && width
+      ? Math.round(pin.height * width / pin.width)
+      : best.height;
+  return { imageUrl, width: width || null, height };
 }
 
 export function derivePreviewUrl(pin: NormalizedPin): string | null {
-  return pin.previewUrl ?? pin.imageVariants
-    .filter((variant) => (variant.width ?? Number.MAX_SAFE_INTEGER) < (pin.width ?? Number.MAX_SAFE_INTEGER))
-    .sort((a, b) => (a.width ?? 0) - (b.width ?? 0))[0]?.url ?? null;
+  if (!pin.previewUrl) return null;
+  return promoteToLargePinterestImage(pin.previewUrl);
 }
