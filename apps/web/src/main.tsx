@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useState, type CSSProperties, type FormEvent, type ReactElement, type ReactNode, type SyntheticEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { InfiniteAssetFooter, useInfiniteAssets } from './asset-pagination';
+import { bindPreviewGallery } from './preview-gallery';
 import './styles.css';
 
 type AnyRecord = Record<string, any>;
@@ -21,6 +22,8 @@ interface SearchResult { query: string; collections: Collection[]; assets: Asset
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '');
 const API_TOKEN = import.meta.env.VITE_INTEGRATION_TOKEN ?? 'tokia-local-dev-token';
+
+if (typeof document !== 'undefined') bindPreviewGallery(document);
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = path === '/api/assets?mediaType=image&pageSize=100' ? '/api/assets?mediaType=source&pageSize=100' : path;
