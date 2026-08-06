@@ -114,6 +114,19 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(46, 108, 246
 .button-secondary { color: var(--text); background: #fff; border-color: var(--border); box-shadow: 0 3px 9px rgba(47, 67, 98, .04); }
 .button-secondary:hover, .button-quiet:hover { background: #f7faff; border-color: #b2c7e8; }
 .button-quiet { color: var(--muted); background: var(--surface-soft); border-color: transparent; }
+.button-success { color: #fff; background: #20ad6b; border-color: #20ad6b; box-shadow: 0 9px 18px rgba(32, 173, 107, .2); }
+.button-success:hover { background: #159b5b; border-color: #159b5b; box-shadow: 0 11px 23px rgba(32, 173, 107, .26); }
+.button-danger { color: #a44731; background: #fff0e9; border-color: #f2b7a7; box-shadow: 0 7px 16px rgba(203, 95, 70, .12); }
+.button-danger:hover { color: #923624; background: #ffe8df; border-color: #e79b88; }
+button:disabled,
+button:disabled:hover {
+  cursor: not-allowed;
+  transform: none;
+  color: #9ba7b7;
+  background: #edf1f5;
+  border-color: #e1e7ee;
+  box-shadow: none;
+}
 .utility-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; }
 .text-button { min-height: auto; padding: 3px 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .text-button:hover { transform: none; color: var(--blue-deep); }

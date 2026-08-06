@@ -36,10 +36,21 @@ const progress = $('progress');
 const progressFill = $('progress-fill');
 const result = $('result');
 const error = $('error');
+const stopButton = $('stop-scan') as HTMLButtonElement;
+const sendButton = $('send') as HTMLButtonElement;
 
 function setStatus(value: string): void { status.textContent = value; }
 function setError(value: string): void { error.textContent = value; }
 function setResult(value: string): void { result.textContent = value; }
+function setControlState(button: HTMLButtonElement, enabled: boolean, activeClass: 'button-success' | 'button-danger'): void {
+  button.disabled = !enabled;
+  button.classList.toggle(activeClass, enabled);
+  button.classList.toggle('button-quiet', !enabled);
+}
+function setScanControls(scanning: boolean, payloadReady: boolean): void {
+  setControlState(stopButton, scanning, 'button-danger');
+  setControlState(sendButton, payloadReady, 'button-success');
+}
 function setProgress(value: string, percentage = 0): void {
   progress.textContent = value;
   progressFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
@@ -115,10 +126,14 @@ async function startScan(mode: 'visible' | 'full'): Promise<void> {
   await ensureContentScript(activeTab);
   activePort?.disconnect();
   activePort = chrome.tabs.connect(activeTab.id, { name: 'scan-control' });
+  setScanControls(true, false);
   setStatus(mode === 'visible' ? 'Scanning visible Pins...' : 'Scanning entire board...');
   setProgress('0 Pins');
   const response = await chrome.tabs.sendMessage(activeTab.id, { type: 'START_SCAN', settings: scanSettings(mode) }) as { accepted: boolean; error?: string };
-  if (!response.accepted) setError(response.error ?? 'The scan could not be started.');
+  if (!response.accepted) {
+    setScanControls(false, false);
+    setError(response.error ?? 'The scan could not be started.');
+  }
 }
 
 async function stopScan(): Promise<void> {
@@ -139,6 +154,7 @@ async function sendToApplication(): Promise<void> {
       });
       const body = await response.json().catch(() => ({}));
       if (response.ok) {
+        setControlState(sendButton, false, 'button-success');
         setStatus('Import complete');
         setResult(`Received: ${body.summary.received} · New: ${body.summary.assetsCreated} · Updated: ${body.summary.assetsUpdated} · Duplicates skipped: ${body.summary.duplicatesSkipped} · Invalid: ${body.summary.invalid}`);
         return;
@@ -174,11 +190,15 @@ chrome.runtime.onMessage.addListener((message: { type?: string; progress?: ScanP
     currentPayload = message.payload;
     activePort?.disconnect();
     activePort = undefined;
+    setScanControls(false, true);
     setProgress(`${message.payload.pins.length} unique Pins · ${message.progress?.phase ?? 'complete'}`, 100);
     setStatus('Scan ready');
     setResult('Payload ready in memory. Send it to Tokia to import.');
   }
-  if (message.type === 'SCAN_ERROR') setError(message.error ?? 'The scan failed.');
+  if (message.type === 'SCAN_ERROR') {
+    setScanControls(false, false);
+    setError(message.error ?? 'The scan failed.');
+  }
 });
 
 $('scan-visible').addEventListener('click', () => void startScan('visible'));
