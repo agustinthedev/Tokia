@@ -4,6 +4,7 @@ export type Provider = typeof PROVIDER_PINTEREST;
 export type CollectionStatus = 'active' | 'disabled' | 'error';
 export type AssetStatus = 'available' | 'unavailable' | 'invalid' | 'disabled';
 export type ImportRunStatus = 'processing' | 'completed' | 'completed_with_warnings' | 'failed';
+export type MediaType = 'image' | 'video' | 'animated';
 
 export interface ImageVariant {
   url: string;
@@ -21,7 +22,11 @@ export interface IngestionBoard {
 export interface IngestionPin {
   externalId?: string | null;
   pinUrl?: string | null;
-  imageUrl: string;
+  imageUrl?: string | null;
+  mediaUrl?: string | null;
+  mediaType?: MediaType | null;
+  mimeType?: string | null;
+  durationSeconds?: number | null;
   previewUrl?: string | null;
   imageVariants?: ImageVariant[];
   title?: string | null;
@@ -47,6 +52,10 @@ export interface NormalizedPin extends IngestionPin {
   normalizedImageKey: string | null;
   identityKey: string;
   imageUrl: string;
+  mediaUrl: string;
+  mediaType: MediaType;
+  mimeType: string | null;
+  durationSeconds: number | null;
   previewUrl: string | null;
   imageVariants: ImageVariant[];
 }

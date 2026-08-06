@@ -34,7 +34,10 @@ type AssetRow = {
   external_asset_id: string | null;
   canonical_asset_url: string | null;
   remote_image_url: string;
+  remote_media_url: string | null;
   remote_preview_url: string | null;
+  media_type: string;
+  duration_seconds: number | null;
   normalized_image_key: string | null;
   title: string | null;
   description: string | null;
@@ -174,7 +177,10 @@ function updateAsset(db: Database.Database, existing: AssetRow, pin: NormalizedP
     (best.width !== null && (existing.width === null || best.width > existing.width));
   const next = {
     remote_image_url: useIncomingImage ? best.imageUrl : existing.remote_image_url,
+    remote_media_url: pin.mediaUrl ?? existing.remote_media_url ?? best.imageUrl,
     remote_preview_url: existing.remote_preview_url ?? derivePreviewUrl(pin),
+    media_type: pin.mediaType ?? existing.media_type,
+    duration_seconds: pin.durationSeconds ?? existing.duration_seconds,
     normalized_image_key: existing.normalized_image_key ?? pin.normalizedImageKey,
     external_asset_id: existing.external_asset_id ?? pin.externalId,
     canonical_asset_url: existing.canonical_asset_url ?? pin.canonicalUrl,
@@ -192,7 +198,10 @@ function updateAsset(db: Database.Database, existing: AssetRow, pin: NormalizedP
   if (changed) {
     db.prepare(`UPDATE assets SET
       remote_image_url = @remote_image_url,
+      remote_media_url = @remote_media_url,
       remote_preview_url = @remote_preview_url,
+      media_type = @media_type,
+      duration_seconds = @duration_seconds,
       normalized_image_key = @normalized_image_key,
       external_asset_id = @external_asset_id,
       canonical_asset_url = @canonical_asset_url,
@@ -219,7 +228,10 @@ function insertAsset(db: Database.Database, pin: NormalizedPin, timestamp: strin
     external_asset_id: pin.externalId,
     canonical_asset_url: pin.canonicalUrl,
     remote_image_url: best.imageUrl,
+    remote_media_url: pin.mediaUrl,
     remote_preview_url: pin.previewUrl ?? derivePreviewUrl(pin),
+    media_type: pin.mediaType,
+    duration_seconds: pin.durationSeconds,
     normalized_image_key: pin.normalizedImageKey,
     title: pin.title ?? null,
     description: pin.description ?? null,
@@ -235,11 +247,11 @@ function insertAsset(db: Database.Database, pin: NormalizedPin, timestamp: strin
     updated_at: timestamp
   };
   db.prepare(`INSERT INTO assets(
-    id, provider, external_asset_id, canonical_asset_url, remote_image_url, remote_preview_url,
-    normalized_image_key, title, description, alt_text, source_link, width, height, mime_type,
+    id, provider, external_asset_id, canonical_asset_url, remote_image_url, remote_media_url, remote_preview_url,
+    media_type, duration_seconds, normalized_image_key, title, description, alt_text, source_link, width, height, mime_type,
     status, first_seen_at, last_seen_at, created_at, updated_at
-  ) VALUES (@id, @provider, @external_asset_id, @canonical_asset_url, @remote_image_url, @remote_preview_url,
-    @normalized_image_key, @title, @description, @alt_text, @source_link, @width, @height, @mime_type,
+  ) VALUES (@id, @provider, @external_asset_id, @canonical_asset_url, @remote_image_url, @remote_media_url, @remote_preview_url,
+    @media_type, @duration_seconds, @normalized_image_key, @title, @description, @alt_text, @source_link, @width, @height, @mime_type,
     @status, @first_seen_at, @last_seen_at, @created_at, @updated_at)`).run(row);
   return row;
 }

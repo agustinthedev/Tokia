@@ -11,8 +11,10 @@
     "build": "npm run build --workspaces",
     "build:shared": "npm run build --workspace @tokia/shared",
     "build:api": "npm run build --workspace @tokia/api",
+    "build:web": "npm run build --workspace @tokia/web",
     "build:extension": "npm run build --workspace @tokia/extension",
     "dev": "npm run build:shared && npm run dev --workspace @tokia/api",
+    "dev:web": "npm run dev --workspace @tokia/web",
     "start": "npm run start --workspace @tokia/api",
     "migrate": "npm run migrate --workspace @tokia/api",
     "test": "vitest run",
@@ -26,6 +28,7 @@
     "jsdom": "^26.1.0",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
+    "vite": "^7.3.6",
     "vitest": "^3.2.4"
   }
 }

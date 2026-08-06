@@ -1,8 +1,8 @@
 # Tokia
 
-Tokia es una aplicación local-first para importar referencias de imágenes desde un board de Pinterest y dejar una base confiable para futuras presentaciones tipo slideshow. Esta primera fase implementa únicamente la fundación de ingestión: API local, SQLite, normalización/deduplicación, observabilidad y una extensión Chrome/Brave Manifest V3.
+Tokia es una aplicación local-first para importar referencias de imágenes desde Pinterest, organizarlas en proyectos y convertirlas en contenido reutilizable. Incluye la fundación de ingestión, el workspace web y un flujo local de generación de imágenes, carruseles y videos slideshow.
 
-No incluye generación de slideshows, IA, llamadas a OpenAI, proyectos, renderizado de texto, publicación en TikTok, scheduling, autenticación de usuarios finales, analytics ni descarga persistente de imágenes.
+La generación narrativa local es determinista y está preparada para sustituirse por un proveedor de modelos más adelante. La publicación en TikTok/Instagram/Facebook, scheduling, autenticación de usuarios finales y analytics siguen fuera de alcance.
 
 ## Arquitectura
 
@@ -60,6 +60,10 @@ Variables disponibles:
 | `MAX_REQUEST_BYTES` | `10485760` | Máximo de request, 10 MiB. |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Orígenes exactos separados por comas. Agregar el origen de la extensión luego de cargarla. |
 | `LOG_LEVEL` | `info` | Nivel de logs estructurados. |
+| `CONTENT_STORAGE_DIRECTORY` | `./data/content` | Directorio para derivados de contenido, previews y archivos finales. |
+| `FFMPEG_PATH` | `ffmpeg` | Ejecutable FFmpeg usado para normalización, thumbnails y videos slideshow. |
+| `MODEL_PROVIDER` | `local` | Proveedor narrativo actual; `local` usa generación determinista sin red. |
+| `MODEL_NAME` | `structured-local-v1` | Identificador persistido junto a la configuración de generación. |
 
 El token no se escribe en logs. La extensión lo almacena en `chrome.storage.local`.
 
@@ -267,4 +271,48 @@ La suite cubre normalización de URLs, IDs, claves de imágenes, primera importa
 
 ## Alcance futuro
 
-La tabla de unión permite que una futura entidad `projects` consuma varias colecciones sin acoplar proyectos al origen Pinterest. Las partes más frágiles son la detección de metadata/board ID y los selectores del DOM Pinterest; el API y la deduplicación quedan aislados en `packages/shared` y `apps/api` para que esos cambios no contaminen el almacenamiento.
+## Phase 2: local media workspace
+
+Phase 2 adds `apps/web`, a React + Vite application connected to the Fastify API. It keeps the local-first boundary intact: the browser talks to the API, and only the API opens SQLite. The interface is a dark, responsive media workspace with a collapsible navigation shell, dashboard, collection galleries, global asset browsing, project management, import diagnostics, global search, and local settings.
+
+Collections and projects are intentionally different. A collection is an imported or reusable source board with global asset memberships and import history. A project references one or more collections through `project_collections`; it never copies collection assets. This leaves room for future weighting, media-type rules, usage history, randomized selection, and manual replacement.
+
+### Phase 2 development
+
+Run the API and web app in separate terminals:
+
+```bash
+npm run dev
+npm run dev:web
+```
+
+The API runs at `http://127.0.0.1:3000`; the Vite app runs at `http://127.0.0.1:5173`. If the local token differs from the example value, set `VITE_INTEGRATION_TOKEN` before starting the web app. The API allows the Vite origins through `CORS_ALLOWED_ORIGINS`.
+
+Build everything with:
+
+```bash
+npm run build
+npm run typecheck
+npm test
+npm run migrate
+```
+
+Phase 2 migration `apps/api/migrations/002_phase2.sql` adds separate local collection metadata, cover references, lifecycle timestamps, media type/video metadata, projects, and the project-to-collection relationship. It is additive and safe to run against the Phase 1 SQLite database.
+
+### Phase 2 API surface
+
+The UI uses `GET /api/dashboard`, `/api/settings`, `/api/search`, collection and asset list/detail routes, project CRUD and project-collection association routes, and import-run list/detail routes. Mutation routes retain the local integration token boundary. Image cards use lazy remote previews. Video cards use poster-first rendering and an explicit play affordance; the detail drawer attempts defensive playback and preserves an open-original fallback when a remote host blocks embedding or a URL is unavailable.
+
+### Extensiones posteriores
+
+El workspace conserva puntos de extensión para weighting, recencia, historial de uso de assets, safe areas más avanzadas y proveedores remotos de modelos. La generación actual usa selección aleatoria/reciente, reglas de crop, overlays y reemplazo manual como controles locales verificables.
+
+La tabla de unión mantiene los proyectos desacoplados del origen Pinterest. Las partes más frágiles siguen siendo la detección de metadata/board ID y los selectores del DOM Pinterest; el API y la deduplicación quedan aislados en `packages/shared` y `apps/api` para que esos cambios no contaminen el almacenamiento.
+
+## Phase 3: content workflow
+
+El flujo actual de proyectos permite crear y editar proyectos con nombre, nicho, idioma, notas, preferencias visuales y colecciones de origen. Dentro de cada proyecto se puede crear un borrador de imagen única, carrusel o video slideshow, seleccionar fuentes únicas, reordenar y bloquear imágenes, generar narrativa estructurada, editar y bloquear copy, producir un preview local y confirmar la generación final.
+
+Los estados, jobs, frames, assets derivados y errores quedan persistidos en SQLite. FFmpeg escribe en `CONTENT_STORAGE_DIRECTORY`; los originales de Pinterest no se modifican. Los carruseles y videos tienen endpoints de descarga, y el paquete ZIP incluye los slides finales, metadata y caption.
+
+La migración correspondiente es `apps/api/migrations/003_content_workflow.sql`. El detalle del flujo, los límites actuales y los comandos de verificación están en `docs/phase3-content-workflow.md`.

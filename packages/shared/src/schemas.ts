@@ -5,6 +5,7 @@ export const MAX_FIELD_LENGTH = 10_000;
 
 const nullableText = z.string().trim().max(MAX_FIELD_LENGTH).nullable().optional();
 const httpUrl = z.string().trim().url().refine((value) => /^https?:\/\//i.test(value), 'URL must use http or https');
+export const mediaTypeSchema = z.enum(['image', 'video', 'animated']);
 
 export const imageVariantSchema = z.object({
   url: httpUrl,
@@ -22,7 +23,11 @@ export const boardSchema = z.object({
 export const pinSchema = z.object({
   externalId: z.string().trim().max(500).nullable().optional(),
   pinUrl: httpUrl.nullable().optional(),
-  imageUrl: httpUrl,
+  imageUrl: httpUrl.nullable().optional(),
+  mediaUrl: httpUrl.nullable().optional(),
+  mediaType: mediaTypeSchema.nullable().optional(),
+  mimeType: z.string().trim().max(200).nullable().optional(),
+  durationSeconds: z.number().finite().nonnegative().max(86_400).nullable().optional(),
   previewUrl: httpUrl.nullable().optional(),
   imageVariants: z.array(imageVariantSchema).max(20).optional(),
   title: nullableText,
@@ -34,6 +39,9 @@ export const pinSchema = z.object({
 }).strict().superRefine((pin, context) => {
   if (!pin.externalId && !pin.pinUrl) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Pin requires externalId or pinUrl' });
+  }
+  if (!pin.imageUrl && !pin.mediaUrl) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Pin requires imageUrl or mediaUrl' });
   }
 });
 
