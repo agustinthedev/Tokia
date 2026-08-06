@@ -329,6 +329,15 @@ function getRoute(): { page: PageKey; id?: string } {
 }
 
 function Icon({ name }: { name: string }): ReactElement {
+  if (name === "archive") {
+    return (
+      <span className="icon icon-archive" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M5 7h14M9 7V5h6v2m-8 0 .8 12h6.4L15 7M10 10v6m4-6v6" />
+        </svg>
+      </span>
+    );
+  }
   const icons: Record<string, string> = {
     home: "⌂",
     collections: "▦",
