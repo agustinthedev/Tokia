@@ -91,7 +91,13 @@ function getPinImage(anchor: HTMLAnchorElement, document: Document): HTMLImageEl
 }
 
 function getCard(anchor: HTMLAnchorElement): Element {
-  return anchor.closest('article, [data-test-id], [data-pin-id]') ?? anchor.parentElement ?? anchor;
+  const semanticCard = anchor.closest('article, [data-pin-id], [data-test-id="pin"], [data-test-id="pinrep"]');
+  if (semanticCard) return semanticCard;
+  let current = anchor.parentElement;
+  for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+    if (current.querySelector('video, video source, [data-video-src], [data-video-url], [data-media-url]')) return current;
+  }
+  return anchor.parentElement ?? anchor;
 }
 
 interface DetectedMedia {

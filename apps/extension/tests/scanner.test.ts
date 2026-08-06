@@ -34,6 +34,11 @@ describe('extension Pinterest scanner', () => {
     });
   });
 
+  it('walks up to the full pin card when Pinterest separates the image and video wrappers', () => {
+    const page = dom(`<html><body><h1>Video board</h1><article data-test-id="pin"><div data-test-id="pinrep-image"><a href="/pin/video456/"><img src="https://i.pinimg.com/236x/aa/bb/cc/video456.jpg"></a></div><div data-test-id="pinrep-video"><video poster="https://i.pinimg.com/236x/aa/bb/cc/video456.jpg"><source src="https://v.pinimg.com/videos/video456.mp4" type="video/mp4"></video></div></article></body></html>`);
+    expect(extractVisiblePins(page.window.document)[0]).toMatchObject({ mediaType: 'video', mediaUrl: 'https://v.pinimg.com/videos/video456.mp4' });
+  });
+
   it('deduplicates pins by strong identity while preserving distinct Pin IDs with one image path', () => {
     const pins = [
       { externalId: '1', pinUrl: 'https://www.pinterest.com/pin/1/', imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/same.jpg' },
