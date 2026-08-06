@@ -43,7 +43,7 @@ form.addEventListener('submit', (event) => {
     waitMs: Number((document.getElementById('wait-ms') as HTMLInputElement).value),
     scrollRatio: Number((document.getElementById('scroll-ratio') as HTMLInputElement).value)
   };
-  void chrome.storage.local.set(settings).then(() => { message.textContent = 'Configuración guardada.'; });
+  void chrome.storage.local.set(settings).then(() => { message.textContent = 'Settings saved.'; });
 });
 
 void load();

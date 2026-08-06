@@ -29,14 +29,21 @@ let currentSettings = defaultSettings;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const status = $('status');
+const boardTitle = $('board-title');
+const boardBadge = $('board-badge');
 const boardInfo = $('board-info');
 const progress = $('progress');
+const progressFill = $('progress-fill');
 const result = $('result');
 const error = $('error');
 
 function setStatus(value: string): void { status.textContent = value; }
 function setError(value: string): void { error.textContent = value; }
 function setResult(value: string): void { result.textContent = value; }
+function setProgress(value: string, percentage = 0): void {
+  progress.textContent = value;
+  progressFill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
+}
 
 async function loadSettings(): Promise<ExtensionSettings> {
   const stored = await chrome.storage.local.get(defaultSettings);
@@ -46,12 +53,12 @@ async function loadSettings(): Promise<ExtensionSettings> {
 async function getActiveTab(): Promise<chrome.tabs.Tab> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
-  if (!tab?.id) throw new Error('No active browser tab was found');
+  if (!tab?.id) throw new Error('No active browser tab was found.');
   return tab;
 }
 
 async function ensureContentScript(tab: chrome.tabs.Tab): Promise<void> {
-  if (!tab.id) throw new Error('The active tab has no ID');
+  if (!tab.id) throw new Error('The active tab has no ID.');
   try {
     await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
   } catch {
@@ -64,43 +71,65 @@ async function detect(): Promise<void> {
     activeTab = await getActiveTab();
     await ensureContentScript(activeTab);
     currentBoard = await chrome.tabs.sendMessage(activeTab.id!, { type: 'GET_STATUS' }) as DetectedBoard;
-    boardInfo.textContent = currentBoard.isBoard
-      ? `${currentBoard.name} · ${currentBoard.url}${currentBoard.externalId ? ` · ID ${currentBoard.externalId}` : ''}`
-      : 'La pestaña actual no parece ser un board de Pinterest.';
-    setStatus(currentBoard.isBoard ? 'Board detectado' : 'Página no compatible');
+    if (currentBoard.isBoard) {
+      boardTitle.textContent = currentBoard.name;
+      boardBadge.textContent = 'Ready';
+      boardBadge.className = 'badge';
+      boardInfo.textContent = `${currentBoard.name} · ${currentBoard.url}${currentBoard.externalId ? ` · ID ${currentBoard.externalId}` : ''}`;
+      setStatus('Pinterest board detected');
+    } else {
+      boardTitle.textContent = 'No board detected';
+      boardBadge.textContent = 'Check tab';
+      boardBadge.className = 'badge badge-blue';
+      boardInfo.textContent = 'The current tab does not appear to be a Pinterest board.';
+      setStatus('Unsupported page');
+    }
   } catch (caught) {
-    setStatus('No se pudo inspeccionar la pestaña');
-    setError(caught instanceof Error ? caught.message : 'Abrí un board de Pinterest en la pestaña activa.');
+    boardTitle.textContent = 'Unable to inspect tab';
+    boardBadge.textContent = 'Offline';
+    boardBadge.className = 'badge badge-blue';
+    setStatus('Could not inspect active tab');
+    setError(caught instanceof Error ? caught.message : 'Open a Pinterest board in the active tab.');
   }
 }
 
 function scanSettings(mode: 'visible' | 'full'): ScanSettings {
-  return { mode, maxPins: currentSettings.maxPins, maxDurationMs: currentSettings.maxDurationMs, noNewRounds: currentSettings.noNewRounds, waitMs: mode === 'visible' ? 0 : currentSettings.waitMs, scrollRatio: currentSettings.scrollRatio };
+  return {
+    mode,
+    maxPins: currentSettings.maxPins,
+    maxDurationMs: currentSettings.maxDurationMs,
+    noNewRounds: currentSettings.noNewRounds,
+    waitMs: mode === 'visible' ? 0 : currentSettings.waitMs,
+    scrollRatio: currentSettings.scrollRatio
+  };
 }
 
 async function startScan(mode: 'visible' | 'full'): Promise<void> {
   setError('');
   setResult('');
   if (!activeTab?.id) await detect();
-  if (!activeTab?.id || !currentBoard?.isBoard) { setError('La pestaña activa debe mostrar un board de Pinterest.'); return; }
+  if (!activeTab?.id || !currentBoard?.isBoard) {
+    setError('The active tab must show a Pinterest board.');
+    return;
+  }
   await ensureContentScript(activeTab);
   activePort?.disconnect();
   activePort = chrome.tabs.connect(activeTab.id, { name: 'scan-control' });
-  setStatus(mode === 'visible' ? 'Escaneando Pins visibles…' : 'Escaneando board completo…');
-  progress.textContent = '0 Pins';
+  setStatus(mode === 'visible' ? 'Scanning visible Pins...' : 'Scanning entire board...');
+  setProgress('0 Pins');
   const response = await chrome.tabs.sendMessage(activeTab.id, { type: 'START_SCAN', settings: scanSettings(mode) }) as { accepted: boolean; error?: string };
-  if (!response.accepted) setError(response.error ?? 'No se pudo iniciar el scan.');
+  if (!response.accepted) setError(response.error ?? 'The scan could not be started.');
 }
 
 async function stopScan(): Promise<void> {
   if (activeTab?.id) await chrome.tabs.sendMessage(activeTab.id, { type: 'STOP_SCAN' }).catch(() => undefined);
-  setStatus('Deteniendo scan…');
+  setStatus('Stopping scan...');
 }
 
 async function sendToApplication(): Promise<void> {
-  if (!currentPayload) { setError('Primero ejecutá un scan.'); return; }
+  if (!currentPayload) { setError('Run a scan first.'); return; }
   const url = currentSettings.backendUrl.replace(/\/+$/, '') + '/api/imports/pinterest-board';
-  let lastError = 'No se pudo conectar al backend.';
+  let lastError = 'Could not connect to the backend.';
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await fetch(url, {
@@ -110,68 +139,52 @@ async function sendToApplication(): Promise<void> {
       });
       const body = await response.json().catch(() => ({}));
       if (response.ok) {
-        setStatus('Importación completada');
-        setResult(`Recibidos: ${body.summary.received} · Nuevos: ${body.summary.assetsCreated} · Actualizados: ${body.summary.assetsUpdated} · Duplicados: ${body.summary.duplicatesSkipped} · Inválidos: ${body.summary.invalid}`);
+        setStatus('Import complete');
+        setResult(`Received: ${body.summary.received} · New: ${body.summary.assetsCreated} · Updated: ${body.summary.assetsUpdated} · Duplicates skipped: ${body.summary.duplicatesSkipped} · Invalid: ${body.summary.invalid}`);
         return;
       }
-      lastError = body?.error?.message ?? `Backend respondió ${response.status}`;
+      lastError = body?.error?.message ?? `Backend responded with ${response.status}.`;
       if (response.status < 500 && response.status !== 408 && response.status !== 429) break;
     } catch (caught) {
       lastError = caught instanceof Error ? caught.message : lastError;
     }
     await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
   }
-  setStatus('Falló la importación');
+  setStatus('Import failed');
   setError(lastError);
 }
 
 async function testConnection(): Promise<void> {
   try {
     const response = await fetch(currentSettings.backendUrl.replace(/\/+$/, '') + '/api/health');
-    if (!response.ok) throw new Error(`Backend respondió ${response.status}`);
-    setStatus('Backend conectado');
+    if (!response.ok) throw new Error(`Backend responded with ${response.status}.`);
+    setStatus('Backend connected');
     setError('');
   } catch (caught) {
-    setError(caught instanceof Error ? caught.message : 'No se pudo conectar al backend.');
+    setError(caught instanceof Error ? caught.message : 'Could not connect to the backend.');
   }
-}
-
-function copyJson(): void {
-  if (!currentPayload) { setError('Primero ejecutá un scan.'); return; }
-  void navigator.clipboard.writeText(JSON.stringify(currentPayload, null, 2)).then(() => setResult('JSON copiado al portapapeles.'));
-}
-
-function downloadJson(): void {
-  if (!currentPayload) { setError('Primero ejecutá un scan.'); return; }
-  const blob = new Blob([JSON.stringify(currentPayload, null, 2)], { type: 'application/json' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = 'tokia-pinterest-import.json';
-  link.click();
-  URL.revokeObjectURL(link.href);
 }
 
 chrome.runtime.onMessage.addListener((message: { type?: string; progress?: ScanProgress; payload?: IngestionPayload; error?: string }) => {
   if (message.type === 'SCAN_PROGRESS' && message.progress) {
-    progress.textContent = `${message.progress.uniquePins} Pins · ronda ${message.progress.rounds} · ${message.progress.phase}`;
+    const percentage = (message.progress.uniquePins / currentSettings.maxPins) * 100;
+    setProgress(`${message.progress.uniquePins} Pins · round ${message.progress.rounds} · ${message.progress.phase}`, percentage);
   }
   if (message.type === 'SCAN_COMPLETE' && message.payload) {
     currentPayload = message.payload;
     activePort?.disconnect();
     activePort = undefined;
-    progress.textContent = `${message.payload.pins.length} Pins únicos · ${message.progress?.phase ?? 'complete'}`;
-    setStatus('Scan listo');
-    setResult('Payload generado en memoria. Podés enviarlo o copiarlo.');
+    setProgress(`${message.payload.pins.length} unique Pins · ${message.progress?.phase ?? 'complete'}`, 100);
+    setStatus('Scan ready');
+    setResult('Payload ready in memory. Send it to Tokia to import.');
   }
-  if (message.type === 'SCAN_ERROR') setError(message.error ?? 'El scan falló.');
+  if (message.type === 'SCAN_ERROR') setError(message.error ?? 'The scan failed.');
 });
 
 $('scan-visible').addEventListener('click', () => void startScan('visible'));
 $('scan-full').addEventListener('click', () => void startScan('full'));
 $('stop-scan').addEventListener('click', () => void stopScan());
 $('send').addEventListener('click', () => void sendToApplication());
-$('copy').addEventListener('click', copyJson);
-$('download').addEventListener('click', downloadJson);
 $('test-connection').addEventListener('click', () => void testConnection());
 $('settings').addEventListener('click', () => void chrome.runtime.openOptionsPage());
 window.addEventListener('unload', () => activePort?.disconnect());
