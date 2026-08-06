@@ -586,12 +586,12 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
 
   app.delete('/api/content/:id', { schema: { tags: ['content'], summary: 'Archive a content draft' } }, async (request, reply) => {
     if (!integrationGuard(settings, request, reply)) return;
-    const { id } = request.params as { id: string }; contentExists(id); db.prepare("UPDATE content_items SET status = 'archived', archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE id = ?").run(now(), now(), id); return contentSnapshot(db, id);
+    const { id } = request.params as { id: string }; contentExists(id); const archivedAt = now(); db.prepare("UPDATE content_items SET status = 'archived', archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE id = ?").run(archivedAt, archivedAt, id); return { id, status: 'archived', archivedAt };
   });
 
   app.patch('/api/content/:id/archive', { schema: { tags: ['content'], summary: 'Archive content' } }, async (request, reply) => {
     if (!integrationGuard(settings, request, reply)) return;
-    const { id } = request.params as { id: string }; contentExists(id); db.prepare("UPDATE content_items SET status = 'archived', archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE id = ?").run(now(), now(), id); return contentSnapshot(db, id);
+    const { id } = request.params as { id: string }; contentExists(id); const archivedAt = now(); db.prepare("UPDATE content_items SET status = 'archived', archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE id = ?").run(archivedAt, archivedAt, id); return { id, status: 'archived', archivedAt };
   });
 
   function queueNarrative(contentId: string, jobType: 'narrative_generation' | 'caption_regeneration' | 'frame_regeneration', input: Row = {}): Row {
