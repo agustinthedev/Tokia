@@ -27,10 +27,12 @@ export interface InfiniteAssetsState<T> {
 }
 
 const PAGE_SIZE = 36;
+const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '');
 
 function pageUrl(basePath: string, page: number): string {
-  const separator = basePath.includes('?') ? '&' : '?';
-  return `${basePath}${separator}page=${page}&pageSize=${PAGE_SIZE}`;
+  const target = /^https?:\/\//.test(basePath) ? basePath : `${API_BASE}${basePath}`;
+  const separator = target.includes('?') ? '&' : '?';
+  return `${target}${separator}page=${page}&pageSize=${PAGE_SIZE}`;
 }
 
 export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAssetsState<T> {
