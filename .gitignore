@@ -4,9 +4,10 @@ coverage/
 .env
 .env.*
 !.env.example
+.tmp-*/
+.runtime/
 data/
 *.db
 *.db-shm
 *.db-wal
 .DS_Store
-

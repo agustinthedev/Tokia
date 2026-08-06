@@ -12,5 +12,7 @@ await Promise.all([
   build({ entryPoints: [path.join(root, 'src/popup.ts')], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(out, 'popup.js'), sourcemap: true }),
   build({ entryPoints: [path.join(root, 'src/options.ts')], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(out, 'options.js'), sourcemap: true })
 ]);
-for (const file of ['manifest.json', 'popup.html', 'options.html', 'popup.css']) fs.copyFileSync(path.join(root, file), path.join(out, file));
+for (const file of ['manifest.json', 'popup.html', 'options.html', 'popup.css', 'tokia-rocket.svg']) fs.copyFileSync(path.join(root, file), path.join(out, file));
+fs.mkdirSync(path.join(out, 'icons'), { recursive: true });
+for (const file of fs.readdirSync(path.join(root, 'icons'))) fs.copyFileSync(path.join(root, 'icons', file), path.join(out, 'icons', file));
 console.log(`Extension built at ${out}`);

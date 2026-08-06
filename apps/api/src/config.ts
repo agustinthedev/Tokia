@@ -1,8 +1,10 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
-dotenv.config();
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+dotenv.config({ path: path.join(repositoryRoot, '.env') });
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value);

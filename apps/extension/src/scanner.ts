@@ -1,5 +1,6 @@
 import {
   extractPinterestPinId,
+  extractPinterestVideoMedia,
   normalizePinimgImageKey,
   normalizePinterestBoardUrl,
   normalizePinterestPinUrl,
@@ -91,7 +92,74 @@ function getPinImage(anchor: HTMLAnchorElement, document: Document): HTMLImageEl
 }
 
 function getCard(anchor: HTMLAnchorElement): Element {
-  return anchor.closest('article, [data-test-id], [data-pin-id]') ?? anchor.parentElement ?? anchor;
+  const semanticCard = anchor.closest('article, [data-pin-id], [data-test-id="pin"], [data-test-id="pinrep"]');
+  if (semanticCard) return semanticCard;
+  let current = anchor.parentElement;
+  for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+    if (current.querySelector('video, video source, [data-video-src], [data-video-url], [data-media-url]')) return current;
+  }
+  return anchor.parentElement ?? anchor;
+}
+
+interface DetectedMedia {
+  image: HTMLImageElement | null;
+  video: HTMLVideoElement | null;
+  hasVideoMarker: boolean;
+  posterUrl: string | null;
+  mediaUrl: string | null;
+  mimeType: string | null;
+  durationSeconds: number | null;
+}
+
+function looksLikeVideoUrl(value: string): boolean {
+  return /\.(?:mp4|webm|mov|m4v)(?:[?#]|$)/i.test(value) || /(?:pinimg\.com\/videos?|\/videos?\/)/i.test(value);
+}
+
+function getMediaAttribute(element: Element): string | null {
+  const values = [
+    element.getAttribute('src'),
+    element.getAttribute('data-video-src'),
+    element.getAttribute('data-video-url'),
+    element.getAttribute('data-media-url'),
+    element.getAttribute('data-src')
+  ];
+  return values.find((value) => Boolean(value && looksLikeVideoUrl(value))) ?? null;
+}
+
+function getDetectedMedia(anchor: HTMLAnchorElement, card: Element, document: Document): DetectedMedia {
+  const image = getPinImage(anchor, document) ?? card.querySelector<HTMLImageElement>('img');
+  const video = card.querySelector<HTMLVideoElement>('video');
+  const hasVideoMarker = Boolean(card.querySelector('[data-test-id*="video"], [data-pin-type="video"], [data-type="video"]')) ||
+    Array.from(card.querySelectorAll<HTMLElement>('[aria-label]')).some((node) => /video/i.test(node.getAttribute('aria-label') ?? ''));
+  const mediaNodes = [
+    ...(video ? [video] : []),
+    ...Array.from(card.querySelectorAll<HTMLSourceElement>('video source')),
+    ...Array.from(card.querySelectorAll('[data-video-src], [data-video-url], [data-media-url]'))
+  ];
+  let mediaUrl: string | null = null;
+  let mimeType: string | null = null;
+  for (const node of mediaNodes) {
+    const candidate = getMediaAttribute(node);
+    if (!mediaUrl && candidate) mediaUrl = absoluteUrl(candidate, document);
+    if (!mimeType) mimeType = text(node.getAttribute('type'));
+  }
+  if (!mediaUrl) {
+    const embedded = card.outerHTML.replace(/\\u002F/g, '/').match(/https?:\/\/[^"'\s<>]*(?:\.mp4|\.webm|\.mov|\.m4v)(?:[?#][^"'\s<>]*)?/i);
+    if (embedded?.[0]) mediaUrl = absoluteUrl(embedded[0], document);
+  }
+  if (!mimeType && mediaUrl) {
+    if (/\.mp4(?:[?#]|$)/i.test(mediaUrl)) mimeType = 'video/mp4';
+    else if (/\.webm(?:[?#]|$)/i.test(mediaUrl)) mimeType = 'video/webm';
+    else if (/\.mov(?:[?#]|$)/i.test(mediaUrl)) mimeType = 'video/quicktime';
+  }
+  const posterValue = video?.getAttribute('poster') ?? card.querySelector('[data-video-poster]')?.getAttribute('data-video-poster');
+  const posterUrl = absoluteUrl(posterValue, document);
+  const rawDuration = video?.getAttribute('data-duration-seconds') ?? video?.getAttribute('data-duration');
+  const parsedDuration = rawDuration ? Number(rawDuration) : Number.NaN;
+  const durationSeconds = video && Number.isFinite(video.duration) && video.duration >= 0
+    ? video.duration
+    : Number.isFinite(parsedDuration) && parsedDuration >= 0 ? parsedDuration : null;
+  return { image, video, hasVideoMarker, posterUrl, mediaUrl, mimeType, durationSeconds };
 }
 
 function getTextFromCard(card: Element, selectors: string[]): string | null {
@@ -132,25 +200,30 @@ export function extractVisiblePins(document: Document): IngestionPin[] {
     const pinUrl = absoluteUrl(anchor.getAttribute('href'), document);
     const canonicalUrl = normalizePinterestPinUrl(pinUrl);
     const externalId = extractPinterestPinId(pinUrl);
-    const image = getPinImage(anchor, document);
-    if (!image) continue;
-    const variants = [
-      ...parseSrcset(image.getAttribute('srcset'), document),
-      ...parseSrcset(image.getAttribute('data-srcset'), document)
-    ].filter((variant, index, list) => list.findIndex((other) => other.url === variant.url) === index);
-    const currentImage = absoluteUrl(image.currentSrc || image.getAttribute('src') || image.getAttribute('data-src'), document);
-    const best = variants[0]?.url ?? currentImage;
-    if (!best) continue;
     const card = getCard(anchor);
-    const width = variants[0]?.width ?? parseDimension(image.getAttribute('width')) ?? (image.naturalWidth || null);
-    const height = parseDimension(image.getAttribute('height')) ?? (image.naturalHeight || null);
+    const media = getDetectedMedia(anchor, card, document);
+    const image = media.image;
+    const variants = [
+      ...parseSrcset(image?.getAttribute('srcset'), document),
+      ...parseSrcset(image?.getAttribute('data-srcset'), document)
+    ].filter((variant, index, list) => list.findIndex((other) => other.url === variant.url) === index);
+    const currentImage = absoluteUrl(image?.currentSrc || image?.getAttribute('src') || image?.getAttribute('data-src'), document) ?? media.posterUrl;
+    const imageUrl = variants[0]?.url ?? currentImage;
+    const best = imageUrl ?? media.mediaUrl;
+    if (!best) continue;
+    const width = variants[0]?.width ?? parseDimension(image?.getAttribute('width')) ?? (image?.naturalWidth || null) ?? parseDimension(media.video?.getAttribute('width')) ?? (media.video?.videoWidth || null);
+    const height = parseDimension(image?.getAttribute('height')) ?? (image?.naturalHeight || null) ?? parseDimension(media.video?.getAttribute('height')) ?? (media.video?.videoHeight || null);
     const title = text(anchor.getAttribute('data-pin-title')) ?? text(anchor.getAttribute('title')) ?? getTextFromCard(card, ['[data-test-id*="title"]', 'h2', 'h3']);
     const description = text(anchor.getAttribute('data-pin-description')) ?? getTextFromCard(card, ['[data-test-id*="description"]', '[data-test-id*="desc"]']);
-    const altText = text(image.getAttribute('alt'));
+    const altText = text(image?.getAttribute('alt')) ?? text(media.video?.getAttribute('aria-label'));
     pins.push({
       externalId,
       pinUrl: canonicalUrl ?? pinUrl,
-      imageUrl: best,
+      imageUrl: imageUrl ?? undefined,
+      mediaUrl: media.mediaUrl ?? undefined,
+      mediaType: media.mediaUrl || media.video || media.hasVideoMarker ? 'video' : 'image',
+      mimeType: media.mimeType,
+      durationSeconds: media.durationSeconds,
       previewUrl: variants.at(-1)?.url ?? currentImage,
       imageVariants: variants,
       title,
@@ -229,14 +302,41 @@ export async function scanBoard(document: Document, settings: ScanSettings, call
     if (collected.size >= settings.maxPins) phase = 'max-pins';
   }
   if (phase === 'scanning') phase = 'complete';
+  const pins = await resolveDeferredVideos(Array.from(collected.values()).slice(0, settings.maxPins));
   const payload: IngestionPayload = {
     schemaVersion: 1,
     source: 'pinterest-browser-extension',
     exportedAt: new Date().toISOString(),
     board: { externalId: board.externalId, name: board.name, url: board.url, description: null },
-    pins: Array.from(collected.values()).slice(0, settings.maxPins)
+    pins
   };
   const progress: ScanProgress = { mode: settings.mode, phase, rounds, uniquePins: payload.pins.length, visiblePins: extractVisiblePins(document).length };
   callbacks.onProgress?.(progress);
   return { payload, progress };
+}
+
+async function resolveDeferredVideos(pins: IngestionPin[]): Promise<IngestionPin[]> {
+  const unresolved = pins.filter((pin) => pin.mediaType === 'video' && !pin.mediaUrl && pin.pinUrl);
+  if (!unresolved.length || typeof fetch !== 'function') return pins;
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < unresolved.length) {
+      const pin = unresolved[nextIndex++];
+      if (!pin?.pinUrl) continue;
+      try {
+        const response = await fetch(pin.pinUrl, { credentials: 'include', headers: { Accept: 'text/html' } });
+        if (!response.ok) continue;
+        const media = extractPinterestVideoMedia(await response.text());
+        if (!media.mediaUrl) continue;
+        pin.mediaUrl = media.mediaUrl;
+        pin.mimeType = media.mimeType ?? pin.mimeType;
+        pin.durationSeconds = media.durationSeconds ?? pin.durationSeconds;
+        if (!pin.imageUrl && media.posterUrl) pin.imageUrl = media.posterUrl;
+      } catch {
+        // Pinterest may block individual pin-page requests; keep the video marker and poster.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, unresolved.length) }, () => worker()));
+  return pins;
 }

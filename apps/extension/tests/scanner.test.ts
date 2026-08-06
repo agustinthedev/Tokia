@@ -21,6 +21,29 @@ describe('extension Pinterest scanner', () => {
       .toBe('https://i.pinimg.com/originals/aa/bb/cc/a.jpg');
   });
 
+  it('detects video pins from video sources and poster metadata', () => {
+    const page = dom(`<html><body><h1>Video board</h1><article><a href="/pin/video123/"><video poster="https://i.pinimg.com/236x/aa/bb/cc/video.jpg"><source src="https://v.pinimg.com/videos/video123.mp4" type="video/mp4"></video></a></article></body></html>`);
+    const pins = extractVisiblePins(page.window.document);
+    expect(pins).toHaveLength(1);
+    expect(pins[0]).toMatchObject({
+      externalId: 'video123',
+      imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/video.jpg',
+      mediaUrl: 'https://v.pinimg.com/videos/video123.mp4',
+      mediaType: 'video',
+      mimeType: 'video/mp4'
+    });
+  });
+
+  it('walks up to the full pin card when Pinterest separates the image and video wrappers', () => {
+    const page = dom(`<html><body><h1>Video board</h1><article data-test-id="pin"><div data-test-id="pinrep-image"><a href="/pin/video456/"><img src="https://i.pinimg.com/236x/aa/bb/cc/video456.jpg"></a></div><div data-test-id="pinrep-video"><video poster="https://i.pinimg.com/236x/aa/bb/cc/video456.jpg"><source src="https://v.pinimg.com/videos/video456.mp4" type="video/mp4"></video></div></article></body></html>`);
+    expect(extractVisiblePins(page.window.document)[0]).toMatchObject({ mediaType: 'video', mediaUrl: 'https://v.pinimg.com/videos/video456.mp4' });
+  });
+
+  it('keeps a video marker when Pinterest defers the playable URL until the pin opens', () => {
+    const page = dom(`<html><body><h1>Video board</h1><article><a href="/pin/video789/"><img src="https://i.pinimg.com/236x/aa/bb/cc/video789.jpg"></a><div data-test-id="pinrep-video"></div></article></body></html>`);
+    expect(extractVisiblePins(page.window.document)[0]).toMatchObject({ mediaType: 'video', imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/video789.jpg' });
+  });
+
   it('deduplicates pins by strong identity while preserving distinct Pin IDs with one image path', () => {
     const pins = [
       { externalId: '1', pinUrl: 'https://www.pinterest.com/pin/1/', imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/same.jpg' },

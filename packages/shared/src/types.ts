@@ -52,7 +52,7 @@ export interface NormalizedPin extends IngestionPin {
   normalizedImageKey: string | null;
   identityKey: string;
   imageUrl: string;
-  mediaUrl: string;
+  mediaUrl: string | null;
   mediaType: MediaType;
   mimeType: string | null;
   durationSeconds: number | null;

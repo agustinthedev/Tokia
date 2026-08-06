@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type Database from 'better-sqlite3';
-import { assetStatusSchema, collectionStatusSchema } from '@tokia/shared';
+import { assetStatusSchema, collectionStatusSchema, isPlayableVideoUrl } from '@tokia/shared';
 import { config as defaultConfig } from './config.js';
 import { createDatabase } from './db.js';
 import { getCollection, getImportRun, IngestionError, ingestPinterestBoard } from './ingestion.js';
@@ -14,6 +14,7 @@ import { contentSnapshot, createContentDraft, enqueueJob, startContentWorker, up
 import { contentDirectory } from './content-media.js';
 import { createZip } from './zip.js';
 import { CONTENT_TYPES, DEFAULT_CONFIGURATION, ContentValidationError, contentFrameCount, frameRoles, mergeConfiguration, slugify, type ContentConfiguration } from './content-model.js';
+import { resolvePinterestVideo } from './pinterest-media.js';
 
 type AppSettings = typeof defaultConfig;
 type QueryRecord = Record<string, string | undefined>;
@@ -80,7 +81,7 @@ function toCollection(row: Row): Row {
 function toAsset(row: Row): Row {
   const kind = mediaType(row);
   const imageUrl = row.remote_image_url;
-  const mediaUrl = row.remote_media_url ?? imageUrl;
+  const mediaUrl = kind === 'video' ? (isPlayableVideoUrl(row.remote_media_url) ? row.remote_media_url : null) : (row.remote_media_url ?? imageUrl);
   return {
     id: row.id,
     provider: row.provider,
@@ -374,6 +375,26 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
     return { ...toAsset(row), collections: collections.map(toCollection) };
   });
 
+  app.post('/api/assets/:id/resolve-media', { schema: { tags: ['assets'], summary: 'Resolve deferred Pinterest video media' } }, async (request, reply) => {
+    if (!integrationGuard(settings, request, reply)) return;
+    const { id } = request.params as { id: string };
+    const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Row | undefined;
+    if (!row) return reply.code(404).send({ error: { code: 'ASSET_NOT_FOUND', message: 'Asset not found' } });
+    if (mediaType(row) !== 'video') return reply.code(422).send({ error: { code: 'ASSET_IS_NOT_VIDEO', message: 'Only video assets can resolve media' } });
+    if (isPlayableVideoUrl(row.remote_media_url)) return toAsset(row);
+    if (typeof row.canonical_asset_url !== 'string' || !row.canonical_asset_url) return reply.code(422).send({ error: { code: 'VIDEO_SOURCE_UNAVAILABLE', message: 'This video has no Pinterest source URL' } });
+    const resolved = await resolvePinterestVideo(row.canonical_asset_url);
+    if (!resolved.mediaUrl) return reply.code(422).send({ error: { code: 'VIDEO_SOURCE_UNAVAILABLE', message: 'Pinterest did not expose a playable video URL for this Pin' } });
+    db.prepare(`UPDATE assets SET
+      remote_media_url = ?,
+      remote_preview_url = COALESCE(?, remote_preview_url),
+      mime_type = COALESCE(?, mime_type),
+      duration_seconds = COALESCE(?, duration_seconds),
+      updated_at = ?
+      WHERE id = ?`).run(resolved.mediaUrl, resolved.posterUrl, resolved.mimeType, resolved.durationSeconds, now(), id);
+    return toAsset(db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Row);
+  });
+
   app.get('/api/import-runs', { schema: { tags: ['imports'], summary: 'List import runs' } }, async (request) => {
     const query = queryOf(request); const page = positiveInt(query.page, 1, 1_000_000); const pageSize = positiveInt(query.pageSize, 30, 100);
     const clauses: string[] = []; const params: unknown[] = [];
@@ -462,7 +483,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
   app.post('/api/projects', { schema: { tags: ['projects'], summary: 'Create a project' } }, async (request, reply) => {
     if (!integrationGuard(settings, request, reply)) return;
     const body = bodyOf(request); const name = text(body.name, 200); if (!name) return reply.code(400).send({ error: { code: 'INVALID_PROJECT_NAME', message: 'Project name is required' } });
-    const niche = text(body.niche, 200); if (!niche) return reply.code(400).send({ error: { code: 'INVALID_PROJECT_NICHE', message: 'Niche is required' } });
+    const niche = text(body.niche, 200);
     const duplicate = db.prepare("SELECT id FROM projects WHERE LOWER(name) = LOWER(?) AND status != 'archived'").get(name); if (duplicate) return reply.code(409).send({ error: { code: 'DUPLICATE_PROJECT_NAME', message: 'An active project with this name already exists.' } });
     const ids = collectionIdsFrom(body); if (!ids.length) return reply.code(400).send({ error: { code: 'NO_PROJECT_COLLECTIONS', message: 'Select at least one source collection.' } }); validateCollections(ids);
     const status = body.status === 'archived' ? 'archived' : 'active'; const timestamp = now(); const id = newId();
@@ -479,7 +500,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
     if (!integrationGuard(settings, request, reply)) return;
     const { id } = request.params as { id: string }; const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row | undefined; if (!existing) return reply.code(404).send({ error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
     const body = bodyOf(request); const name = body.name === undefined ? existing.name : text(body.name, 200); if (!name) return reply.code(400).send({ error: { code: 'INVALID_PROJECT_NAME', message: 'Project name is required' } });
-    const niche = body.niche === undefined ? existing.niche : text(body.niche, 200); if (!niche) return reply.code(400).send({ error: { code: 'INVALID_PROJECT_NICHE', message: 'Niche is required' } });
+    const niche = body.niche === undefined ? existing.niche : text(body.niche, 200);
     const duplicate = db.prepare("SELECT id FROM projects WHERE LOWER(name) = LOWER(?) AND id != ? AND status != 'archived'").get(name, id); if (duplicate) return reply.code(409).send({ error: { code: 'DUPLICATE_PROJECT_NAME', message: 'An active project with this name already exists.' } });
     const status = body.status === 'active' || body.status === 'archived' || body.status === 'draft' ? body.status : existing.status; const ids = body.collectionIds === undefined ? null : collectionIdsFrom(body); if (ids) { if (!ids.length) return reply.code(400).send({ error: { code: 'NO_PROJECT_COLLECTIONS', message: 'A project needs at least one source collection.' } }); validateCollections(ids); }
     const timestamp = now(); db.transaction(() => { db.prepare('UPDATE projects SET name = ?, description = ?, niche = ?, default_language = ?, internal_notes = ?, color = ?, status = ?, cover_asset_id = ?, config_json = ?, updated_at = ?, archived_at = ? WHERE id = ?').run(name, body.description === undefined ? existing.description : text(body.description), niche, body.defaultLanguage === undefined ? existing.default_language : (text(body.defaultLanguage, 80) ?? 'English'), body.internalNotes === undefined ? existing.internal_notes : text(body.internalNotes), body.color === undefined ? existing.color : text(body.color, 30), status, body.coverAssetId === undefined ? existing.cover_asset_id : text(body.coverAssetId, 100), body.defaultSettings === undefined && body.config === undefined ? existing.config_json : JSON.stringify(body.defaultSettings ?? body.config), timestamp, status === 'archived' ? (existing.archived_at ?? timestamp) : null, id); if (ids) { db.prepare('DELETE FROM project_collections WHERE project_id = ?').run(id); const insert = db.prepare('INSERT INTO project_collections(project_id, collection_id, created_at) VALUES (?, ?, ?)'); for (const collectionId of ids) insert.run(id, collectionId, timestamp); } })();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractPinterestPinId,
+  normalizePin,
   normalizePinimgImageKey,
   normalizePinterestBoardUrl,
   normalizePinterestPinUrl
@@ -31,5 +32,16 @@ describe('Pinterest URL normalization', () => {
     expect(normalizePinterestBoardUrl('https://example.com/demo/board')).toBeNull();
     expect(normalizePinterestPinUrl('https://example.com/pin/123')).toBeNull();
     expect(normalizePinimgImageKey('https://example.com/image.jpg')).toBeNull();
+  });
+
+  it('keeps a deferred video media URL empty instead of treating its poster as the video', () => {
+    const pin = normalizePin({
+      externalId: 'video-1',
+      pinUrl: 'https://www.pinterest.com/pin/video-1/',
+      imageUrl: 'https://i.pinimg.com/474x/aa/bb/cc/poster.jpg',
+      mediaType: 'video'
+    });
+    expect(pin.mediaUrl).toBeNull();
+    expect(pin.imageUrl).toContain('poster.jpg');
   });
 });
