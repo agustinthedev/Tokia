@@ -71,20 +71,109 @@ function filterFor(configuration: ContentConfiguration, width: number, height: n
   return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
 }
 
-export async function normalizeImage(options: { ffmpegPath: string; sourcePath: string; outputPath: string; configuration: ContentConfiguration; text?: string | null; }): Promise<{ width: number; height: number }> {
+export interface TextOverlay {
+  headline?: string | null;
+  body?: string | null;
+}
+
+interface TextOverlayPart {
+  key: 'headline' | 'body';
+  text: string;
+  fontSize: number;
+  fontFile: string;
+  x: string;
+  y: string;
+  lineSpacing: number;
+  boxBorderWidth: number;
+}
+
+const TEXT_LINE_SPACING = 8;
+const TEXT_BLOCK_GAP = 18;
+
+function clamp(value: number, minimum: number, maximum: number): number { return Math.max(minimum, Math.min(maximum, value)); }
+
+function wrapOverlayText(value: string, maximumCharacters: number): string {
+  return value.replace(/\r\n?/g, '\n').split('\n').flatMap((paragraph) => {
+    const words = paragraph.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return [''];
+    const lines: string[] = [];
+    let line = '';
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && next.length > maximumCharacters) { lines.push(line); line = word; } else line = next;
+    }
+    if (line) lines.push(line);
+    return lines;
+  }).join('\n');
+}
+
+function fontFileFor(fontFamily: string, fontWeight: string): string {
+  const bold = /^(bold|[6-9]\d{2})$/i.test(String(fontWeight ?? '').trim());
+  const family = String(fontFamily ?? 'Arial').trim().toLowerCase();
+  const candidates = family === 'georgia'
+    ? (bold
+      ? ['C:/Windows/Fonts/georgiab.ttf', '/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSerif-Bold.ttf']
+      : ['C:/Windows/Fonts/georgia.ttf', '/usr/share/fonts/truetype/msttcorefonts/Georgia.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf'])
+    : family === 'dejavu sans'
+      ? (bold
+        ? ['/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 'C:/Windows/Fonts/arialbd.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf']
+        : ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'C:/Windows/Fonts/arial.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf'])
+      : (bold
+        ? ['C:/Windows/Fonts/arialbd.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf']
+        : ['C:/Windows/Fonts/arial.ttf', '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']);
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
+}
+
+function textX(configuration: ContentConfiguration): string {
+  if (configuration.visual.textAlignment === 'left') return '60';
+  if (configuration.visual.textAlignment === 'right') return 'w-text_w-60';
+  return '(w-text_w)/2';
+}
+
+export function textOverlayLayout(configuration: ContentConfiguration, width: number, height: number, text: TextOverlay): TextOverlayPart[] {
+  const headline = text.headline?.trim() ?? '';
+  const body = text.body?.trim() ?? '';
+  if (!headline && !body) return [];
+  const headlineSize = clamp(Math.round(configuration.visual.fontSize || 54), 28, 120);
+  const bodySize = clamp(Math.round(headlineSize * 0.58), 20, 72);
+  const headlineText = headline ? wrapOverlayText(headline, clamp(Math.floor(width / (headlineSize * 0.5)), 12, 42)) : '';
+  const bodyText = body ? wrapOverlayText(body, clamp(Math.floor(width / (bodySize * 0.5)), 18, 64)) : '';
+  const headlineLines = headlineText ? headlineText.split('\n').length : 0;
+  const bodyLines = bodyText ? bodyText.split('\n').length : 0;
+  const headlineHeight = headlineLines ? headlineLines * headlineSize + (headlineLines - 1) * TEXT_LINE_SPACING : 0;
+  const bodyHeight = bodyLines ? bodyLines * bodySize + (bodyLines - 1) * TEXT_LINE_SPACING : 0;
+  const blockHeight = headlineHeight + bodyHeight + (headlineText && bodyText ? TEXT_BLOCK_GAP : 0);
+  const top = configuration.visual.textPosition === 'top'
+    ? '80'
+    : configuration.visual.textPosition === 'center'
+      ? `(h-${blockHeight})/2`
+      : `h-${blockHeight}-90`;
+  const bodyY = headlineText ? `${top}+${headlineHeight + TEXT_BLOCK_GAP}` : top;
+  const x = textX(configuration);
+  const parts: TextOverlayPart[] = [];
+  if (headlineText) parts.push({ key: 'headline', text: headlineText, fontSize: headlineSize, fontFile: fontFileFor(configuration.visual.fontFamily, configuration.visual.fontWeight), x, y: top, lineSpacing: TEXT_LINE_SPACING, boxBorderWidth: 24 });
+  if (bodyText) parts.push({ key: 'body', text: bodyText, fontSize: bodySize, fontFile: fontFileFor(configuration.visual.fontFamily, '400'), x, y: bodyY, lineSpacing: TEXT_LINE_SPACING, boxBorderWidth: 16 });
+  return parts;
+}
+
+export async function normalizeImage(options: { ffmpegPath: string; sourcePath: string; outputPath: string; configuration: ContentConfiguration; text?: TextOverlay | null; }): Promise<{ width: number; height: number }> {
   const { width, height } = ratioDimensions(options.configuration.aspectRatio, options.configuration.video.outputResolution === '1080p' ? '1080p' : '720p');
   const filters = [filterFor(options.configuration, width, height)];
-  if (options.text && options.configuration.textMode !== 'none') {
-    const textPath = `${options.outputPath}.txt`;
-    await fsp.writeFile(textPath, options.text.slice(0, 600), 'utf8');
-    const fontCandidate = process.platform === 'win32' ? 'C:/Windows/Fonts/arial.ttf' : '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
-    const y = options.configuration.visual.textPosition === 'top' ? '80' : options.configuration.visual.textPosition === 'center' ? '(h-text_h)/2' : 'h-text_h-90';
-    const x = options.configuration.visual.textAlignment === 'left' ? '60' : options.configuration.visual.textAlignment === 'right' ? 'w-text_w-60' : '(w-text_w)/2';
-    const box = options.configuration.visual.overlay ? `:box=1:boxcolor=black@${Math.max(0, Math.min(1, options.configuration.visual.overlayOpacity))}:boxborderw=28` : '';
-    filters.push(`drawtext=fontfile='${escapedFilterPath(fontCandidate)}':textfile='${escapedFilterPath(textPath)}':fontcolor=${options.configuration.visual.textColor}:fontsize=${Math.max(18, Math.min(120, options.configuration.visual.fontSize))}:x=${x}:y=${y}:line_spacing=10${box}`);
+  const textPaths: string[] = [];
+  try {
+    if (options.text && options.configuration.textMode !== 'none') {
+      for (const part of textOverlayLayout(options.configuration, width, height, options.text)) {
+        const textPath = `${options.outputPath}.${part.key}.txt`;
+        textPaths.push(textPath);
+        await fsp.writeFile(textPath, part.text.slice(0, part.key === 'headline' ? 120 : 600), 'utf8');
+        const box = options.configuration.visual.overlay ? `:box=1:boxcolor=black@${Math.max(0, Math.min(1, options.configuration.visual.overlayOpacity))}:boxborderw=${part.boxBorderWidth}` : '';
+        filters.push(`drawtext=fontfile='${escapedFilterPath(part.fontFile)}':textfile='${escapedFilterPath(textPath)}':fontcolor=${options.configuration.visual.textColor}:fontsize=${part.fontSize}:x=${part.x}:y=${part.y}:line_spacing=${part.lineSpacing}${box}`);
+      }
+    }
+    await runFfmpeg(options.ffmpegPath, ['-y', '-i', options.sourcePath, '-vf', filters.join(','), '-frames:v', '1', '-c:v', 'png', options.outputPath]);
+  } finally {
+    await Promise.all(textPaths.map((textPath) => fsp.rm(textPath, { force: true })));
   }
-  await runFfmpeg(options.ffmpegPath, ['-y', '-i', options.sourcePath, '-vf', filters.join(','), '-frames:v', '1', '-c:v', 'png', options.outputPath]);
-  await fsp.rm(`${options.outputPath}.txt`, { force: true });
   return { width, height };
 }
 

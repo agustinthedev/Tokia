@@ -178,7 +178,7 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
       db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, sha256, metadata_json, created_at)
         VALUES (?, ?, ?, 'image', 'source_normalized', 'ready', ?, 'image/png', ?, ?, ?, ?, ?)`).run(id(), contentId, frame.id, normalizedPath, ratioFor(configuration).width, ratioFor(configuration).height, sourceHash, JSON.stringify({ sourceMediaId: frame.source_media_id }), timestamp);
     }
-    const text = configuration.textMode === 'none' ? null : [frame.headline, frame.body].filter(Boolean).join('\n');
+    const text = configuration.textMode === 'none' ? null : { headline: frame.headline, body: frame.body };
     const outputPath = path.join(directory, `${variant}-${String(index + 1).padStart(2, '0')}.png`);
     const dimensions = await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: normalizedPath, outputPath, configuration, text });
     renderedPaths.push(outputPath);
