@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState, type CSSProperties, type FormEvent, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
+import { StrictMode, useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { InfiniteAssetFooter, useInfiniteAssets } from "./asset-pagination";
 import { bindPreviewGallery } from "./preview-gallery";
@@ -1968,6 +1968,8 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
     },
   });
   const [content, setContent] = useState<ContentDetail | null>(null);
+  const captionDraft = useRef("");
+  const captionContentId = useRef<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -2006,13 +2008,20 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
       active = false;
     };
   }, [existingId]);
+  const hasActiveTextJob = content?.jobs?.some((job) => ["narrative_generation", "caption_regeneration", "frame_regeneration"].includes(job.jobType) && ["queued", "running"].includes(job.status)) ?? false;
   useEffect(() => {
-    if (!content || !["preview_generating", "generation_queued", "generating"].includes(content.status)) return;
+    if (!content || (!hasActiveTextJob && !["preview_generating", "generation_queued", "generating"].includes(content.status))) return;
     const timer = window.setInterval(() => {
       void refreshContent();
     }, 900);
     return () => window.clearInterval(timer);
-  }, [content?.id, content?.status]);
+  }, [content?.id, content?.status, content?.jobs?.length, content?.jobs?.[0]?.status, hasActiveTextJob]);
+  useEffect(() => {
+    if (content && captionContentId.current !== content.id) {
+      captionContentId.current = content.id;
+      captionDraft.current = content.narrative?.caption ?? content.configuration.caption ?? "";
+    }
+  }, [content?.id]);
   const ensureDraft = async (): Promise<ContentDetail> => {
     if (content) {
       const updated = await patchContent({
@@ -2089,18 +2098,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
         return;
       }
       if (step === 6) {
-        if (!content?.narrative) {
-          const result = await request<{
-            content: ContentDetail;
-            job: AnyRecord;
-          }>(`/api/content/${content?.id}/narrative`, {
-            method: "POST",
-            body: JSON.stringify({}),
-          });
-          setContent(result.content);
-          setNotice("Copy generation queued. This step will update automatically.");
-          return;
-        }
+        await saveTextFields();
         setStep(7);
       }
     } catch (caught) {
@@ -2148,9 +2146,10 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
         : current,
     );
   const saveFrame = async (frame: ContentFrame) => {
+    if (!content) return;
     try {
       setContent(
-        await request<ContentDetail>(`/api/content/${content?.id}/frames/${frame.id}`, {
+        await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, {
           method: "PATCH",
           body: JSON.stringify({
             headline: frame.headline,
@@ -2160,6 +2159,77 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save text");
+    }
+  };
+  const generateCopy = async () => {
+    if (!content) return;
+    setSaving(true);
+    setError("");
+    try {
+      const endpoint = content.narrative ? "narrative/regenerate" : "narrative";
+      const result = await request<{ content: ContentDetail; job: AnyRecord }>(`/api/content/${content.id}/${endpoint}`, { method: "POST", body: JSON.stringify({}) });
+      setContent(result.content);
+      captionDraft.current = result.content.narrative?.caption ?? result.content.configuration.caption ?? "";
+      setNotice(content.narrative ? "Copy regeneration queued." : "Copy generation queued. The fields will update automatically.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not generate copy");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const editCaption = (value: string) => {
+    captionDraft.current = value;
+    setContent((current) =>
+      current
+        ? {
+            ...current,
+            configuration: { ...current.configuration, caption: value },
+            narrative: current.narrative ? { ...current.narrative, caption: value } : current.narrative,
+          }
+        : current,
+    );
+  };
+  const saveCaption = async () => {
+    if (!content) return;
+    try {
+      setContent(
+        await request<ContentDetail>(`/api/content/${content.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            configuration: {
+              ...content.configuration,
+              caption: captionDraft.current,
+            },
+          }),
+        }),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save caption");
+    }
+  };
+  const saveTextFields = async () => {
+    if (!content) return;
+    setSaving(true);
+    try {
+      let latest = content;
+      for (const frame of content.frames) {
+        latest = await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ headline: frame.headline, body: frame.body }),
+        });
+      }
+      latest = await request<ContentDetail>(`/api/content/${content.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          configuration: {
+            ...latest.configuration,
+            caption: captionDraft.current,
+          },
+        }),
+      });
+      setContent(latest);
+    } finally {
+      setSaving(false);
     }
   };
   const generatePreview = async () => {
@@ -2638,19 +2708,8 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
               <h3>Review structured copy before rendering</h3>
             </div>
             <div className="detail-actions">
-              <Button
-                onClick={() =>
-                  content &&
-                  request(`/api/content/${content.id}/narrative/regenerate`, {
-                    method: "POST",
-                    body: JSON.stringify({}),
-                  }).then((result: AnyRecord) => {
-                    setContent(result.content);
-                    setNotice("Unlocked copy is regenerating.");
-                  })
-                }
-              >
-                Regenerate copy
+              <Button onClick={generateCopy} disabled={!content || saving || hasActiveTextJob}>
+                {content?.narrative ? "Regenerate copy" : "Generate copy"}
               </Button>
               <Button
                 onClick={() =>
@@ -2663,12 +2722,13 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
                     setNotice("Caption regeneration queued.");
                   })
                 }
+                disabled={!content || saving || hasActiveTextJob}
               >
                 Regenerate caption
               </Button>
             </div>
           </div>
-          {content?.narrative ? (
+          {content ? (
             <div className="text-review-list">
               {content.frames.map((frame) => (
                 <div className="text-review-card" key={frame.id}>
@@ -2678,62 +2738,32 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
                     </span>
                     <Button onClick={() => lockFrame(frame, "textLocked")}>{frame.textLocked ? "Unlock text" : "Lock text"}</Button>
                   </div>
-                  {config.textMode !== "none" && (
-                    <>
-                      <label className="form-field">
-                        <span>Headline</span>
-                        <input value={frame.headline ?? ""} disabled={frame.textLocked} onChange={(event) => editFrame(frame, "headline", event.target.value)} onBlur={() => saveFrame(frame)} />
-                      </label>
-                      {frame.role !== "cta" && (
-                        <label className="form-field">
-                          <span>Body</span>
-                          <textarea value={frame.body ?? ""} disabled={frame.textLocked} onChange={(event) => editFrame(frame, "body", event.target.value)} onBlur={() => saveFrame(frame)} rows={2} />
-                        </label>
-                      )}
-                    </>
+                  <label className="form-field">
+                    <span>Headline</span>
+                    <input value={frame.headline ?? ""} disabled={frame.textLocked} onChange={(event) => editFrame(frame, "headline", event.target.value)} onBlur={(event) => saveFrame({ ...frame, headline: event.target.value })} />
+                  </label>
+                  {frame.role !== "cta" && (
+                    <label className="form-field">
+                      <span>Body</span>
+                      <textarea value={frame.body ?? ""} disabled={frame.textLocked} onChange={(event) => editFrame(frame, "body", event.target.value)} onBlur={(event) => saveFrame({ ...frame, body: event.target.value })} rows={2} />
+                    </label>
                   )}
                 </div>
               ))}
               <label className="form-field">
                 <span>Caption</span>
-                <textarea
-                  value={content.narrative.caption}
-                  onChange={(event) =>
-                    setContent((current) =>
-                      current?.narrative
-                        ? {
-                            ...current,
-                            narrative: {
-                              ...current.narrative,
-                              caption: event.target.value,
-                            },
-                          }
-                        : current,
-                    )
-                  }
-                  onBlur={() =>
-                    content &&
-                    request(`/api/content/${content.id}`, {
-                      method: "PATCH",
-                      body: JSON.stringify({
-                        configuration: {
-                          ...content.configuration,
-                          caption: content.narrative?.caption,
-                        },
-                      }),
-                    })
-                  }
-                  rows={3}
-                />
+                <textarea value={content.narrative?.caption ?? content.configuration.caption ?? ""} onChange={(event) => editCaption(event.target.value)} onBlur={saveCaption} rows={3} />
               </label>
-              <div className="hashtag-row">
-                {content.narrative.hashtags.map((tag) => (
-                  <span key={tag}>{tag}</span>
-                ))}
-              </div>
+              {content.narrative && (
+                <div className="hashtag-row">
+                  {content.narrative.hashtags.map((tag) => (
+                    <span key={tag}>{tag}</span>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
-            <div className="inline-note">No structured copy yet. Use Generate copy to create exact frame roles in {content?.language ?? project.defaultLanguage ?? "English"}.</div>
+            <div className="inline-note">Create the draft first to edit its text fields.</div>
           )}
         </div>
       )}
@@ -2811,7 +2841,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
         {step > 1 && <Button onClick={() => setStep((value) => value - 1)}>Back</Button>}
         {step < 7 && (
           <Button variant="primary" onClick={next} disabled={saving}>
-            {step === 6 && !content?.narrative ? "Generate copy" : "Next"}
+            Next
           </Button>
         )}
         {step === 7 && content?.status === "preview_ready" && (
