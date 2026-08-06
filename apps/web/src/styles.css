@@ -455,6 +455,20 @@ p, .section-header p, .project-card p, .project-detail-hero p, .panel-caption, .
 .stat-detail, .stat-label, .collection-stats, .collection-updated, .asset-card-meta, .content-list-copy span {
   font-weight: 500;
 }
+
+/* Destructive confirmations should be visually distinct from secondary actions. */
+.button.button-danger {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
+  box-shadow: 0 8px 18px rgba(223, 96, 117, .2);
+}
+.button.button-danger:hover {
+  color: #fff;
+  background: #c94f65;
+  border-color: #c94f65;
+  box-shadow: 0 10px 22px rgba(223, 96, 117, .28);
+}
 .global-search, .toolbar select, .search-field, .form-field input, .form-field textarea, .form-field select {
   font-weight: 500;
 }
