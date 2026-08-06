@@ -89,7 +89,7 @@ describe('Pinterest ingestion', () => {
       height: 419
     })]));
     expect(db!.prepare('SELECT remote_image_url, remote_preview_url, width, height FROM assets WHERE external_asset_id = ?').get('legacy-small')).toMatchObject({
-      remote_image_url: 'https://i.pinimg.com/736x/aa/bb/cc/legacy-small.jpg',
+      remote_image_url: 'https://i.pinimg.com/originals/aa/bb/cc/legacy-small.jpg',
       remote_preview_url: null,
       width: 736,
       height: 1307

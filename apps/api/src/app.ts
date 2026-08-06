@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type Database from 'better-sqlite3';
-import { assetStatusSchema, collectionStatusSchema, isPlayableVideoUrl } from '@tokia/shared';
+import { assetStatusSchema, collectionStatusSchema, isPlayableVideoUrl, promoteToLargestPinterestImage } from '@tokia/shared';
 import { config as defaultConfig } from './config.js';
 import { createDatabase } from './db.js';
 import { getCollection, getImportRun, IngestionError, ingestPinterestBoard } from './ingestion.js';
@@ -392,7 +392,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
       mime_type = COALESCE(?, mime_type),
       duration_seconds = COALESCE(?, duration_seconds),
       updated_at = ?
-      WHERE id = ?`).run(resolved.mediaUrl, resolved.posterUrl, resolved.mimeType, resolved.durationSeconds, now(), id);
+      WHERE id = ?`).run(resolved.mediaUrl, resolved.posterUrl ? promoteToLargestPinterestImage(resolved.posterUrl) : null, resolved.mimeType, resolved.durationSeconds, now(), id);
     return toAsset(db.prepare('SELECT * FROM assets WHERE id = ?').get(id) as Row);
   });
 

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
+import { pinterestImageCandidates } from '@tokia/shared';
 import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, frameRoles, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
 import { contentDirectory, createThumbnail, downloadSource, MediaProcessingError, normalizeImage, renderSlideshow, sha256File } from './content-media.js';
 import { generateNarrative, validateNarrative, type Narrative } from './narrative.js';
@@ -18,6 +19,19 @@ function parseJson<T>(value: unknown, fallback: T): T { if (typeof value !== 'st
 function projectRow(db: Database.Database, projectId: string): Row | undefined { return db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Row | undefined; }
 function contentRow(db: Database.Database, contentId: string): Row | undefined { return db.prepare('SELECT c.*, p.name AS project_name, p.niche AS project_niche, p.description AS project_description, p.default_language AS project_language FROM content_items c JOIN projects p ON p.id = c.project_id WHERE c.id = ?').get(contentId) as Row | undefined; }
 function contentConfiguration(row: Row): ContentConfiguration { return mergeConfiguration(parseJson(row.configuration_json, {})); }
+function sourceCacheKey(value: string): string { return crypto.createHash('sha1').update(value).digest('hex').slice(0, 12); }
+async function downloadBestSource(url: string, destination: string): Promise<void> {
+  let lastError: unknown;
+  for (const candidate of pinterestImageCandidates(url)) {
+    try {
+      await downloadSource(candidate, destination);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new MediaProcessingError('SOURCE_DOWNLOAD_FAILED', 'The source image could not be downloaded.');
+}
 function attachedCollectionIds(db: Database.Database, projectId: string): string[] { return (db.prepare('SELECT collection_id FROM project_collections WHERE project_id = ? AND enabled = 1').all(projectId) as Row[]).map((row) => String(row.collection_id)); }
 
 export function validateSourceCollections(db: Database.Database, projectId: string, sourceCollectionIds: string[]): void {
@@ -154,10 +168,10 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
     const frame = frames[index]!; const sourceUrl = String(frame.remote_image_url ?? frame.remote_media_url ?? frame.remote_preview_url ?? '');
     if (!sourceUrl) throw new MediaProcessingError('SOURCE_MEDIA_MISSING', `Source media is missing for frame ${index + 1}.`);
     const sourceKey = String(frame.source_media_id).replace(/[^a-zA-Z0-9_-]/g, '');
-    const normalizedPath = path.join(directory, `source-${String(index + 1).padStart(2, '0')}-${sourceKey}.png`);
+    const normalizedPath = path.join(directory, `source-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.png`);
     if (!fs.existsSync(normalizedPath)) {
       const downloadPath = path.join(directory, `download-${String(index + 1).padStart(2, '0')}`);
-      await downloadSource(sourceUrl, downloadPath);
+      await downloadBestSource(sourceUrl, downloadPath);
       await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: downloadPath, outputPath: normalizedPath, configuration });
       await fsp.rm(downloadPath, { force: true });
       const sourceHash = await sha256File(normalizedPath);

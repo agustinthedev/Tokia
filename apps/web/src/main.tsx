@@ -2471,7 +2471,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
                   <strong>{frame.role}</strong>
                   <span>
                     {frame.sourceMedia?.collectionName ?? "No image selected"}
-                    {frame.sourceMedia?.width ? ` · ${frame.sourceMedia.width} × ${frame.sourceMedia.height}` : ""}
+                    {frame.sourceMedia?.width && frame.sourceMedia?.height ? ` · ${frame.sourceMedia.width} × ${frame.sourceMedia.height}` : ""}
                   </span>
                 </div>
                 <Button onClick={() => lockFrame(frame, "imageLocked")}>{frame.imageLocked ? "Unlock image" : "Lock image"}</Button>

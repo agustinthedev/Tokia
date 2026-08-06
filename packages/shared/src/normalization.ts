@@ -29,15 +29,44 @@ function imageWidthFromUrl(value: string): number | null {
   return width ? Number(width) : null;
 }
 
-function promoteToLargePinterestImage(value: string): string {
+export function pinterestImageQuality(value: string): number {
+  const parsed = parseUrl(value);
+  if (!parsed || parsed.hostname.toLowerCase() !== PINTEREST_IMAGE_HOST) return 0;
+  const segment = parsed.pathname.split('/').filter(Boolean)[0] ?? '';
+  if (/^originals$/i.test(segment)) return Number.MAX_SAFE_INTEGER;
+  const width = segment.match(/^(\d+)x$/i)?.[1];
+  return width ? Number(width) : 0;
+}
+
+export function promoteToLargestPinterestImage(value: string): string {
   const parsed = parseUrl(value);
   if (!parsed || parsed.hostname.toLowerCase() !== PINTEREST_IMAGE_HOST) return value;
   const parts = parsed.pathname.split('/').filter(Boolean);
   const size = parts[0];
-  if (!size || !/^\d+x$/i.test(size) || Number(size.slice(0, -1)) >= FALLBACK_PINTEREST_IMAGE_WIDTH) return value;
-  parts[0] = `${FALLBACK_PINTEREST_IMAGE_WIDTH}x`;
+  if (!size || !/^\d+x$/i.test(size)) return value;
+  parts[0] = 'originals';
   parsed.pathname = `/${parts.join('/')}`;
   return parsed.toString();
+}
+
+export function pinterestImageCandidates(value: string): string[] {
+  const parsed = parseUrl(value);
+  if (!parsed) return [value];
+  const originalParts = parsed.pathname.split('/').filter(Boolean);
+  const originalSize = originalParts[0] ?? '';
+  if (!/^originals$/i.test(originalSize) && !/^\d+x$/i.test(originalSize)) return [value];
+  const largest = /^originals$/i.test(originalSize) ? value : promoteToLargestPinterestImage(value);
+  const largestParsed = parseUrl(largest);
+  if (!largestParsed) return [value];
+  const parts = largestParsed.pathname.split('/').filter(Boolean);
+  const candidates = ['1200x', '1000x', `${FALLBACK_PINTEREST_IMAGE_WIDTH}x`]
+    .map((size) => {
+      const next = [...parts];
+      next[0] = size;
+      largestParsed.pathname = `/${next.join('/')}`;
+      return largestParsed.toString();
+    });
+  return Array.from(new Set([largest, ...candidates, value]));
 }
 
 function parseUrl(value: string | null | undefined): URL | null {
@@ -158,7 +187,7 @@ export function normalizePin(input: {
     mediaType: input.mediaType ?? (/^video\//i.test(input.mimeType ?? '') ? 'video' : 'image'),
     mimeType: input.mimeType ?? null,
     durationSeconds: input.durationSeconds ?? null,
-    previewUrl: normalizeRemoteUrl(input.previewUrl),
+    previewUrl: (() => { const value = normalizeRemoteUrl(input.previewUrl); return value ? promoteToLargestPinterestImage(value) : null; })(),
     imageVariants,
     title: cleanOptionalText(input.title),
     description: cleanOptionalText(input.description),
@@ -174,24 +203,29 @@ export function chooseBestImageUrl(pin: NormalizedPin): { imageUrl: string; widt
     { url: pin.imageUrl, width: pin.width ?? null, height: pin.height ?? null },
     ...pin.imageVariants.map((variant) => ({ url: variant.url, width: variant.width ?? null, height: variant.height ?? null }))
   ];
-  candidates.sort((a, b) => Math.max(b.width ?? 0, imageWidthFromUrl(b.url) ?? 0) - Math.max(a.width ?? 0, imageWidthFromUrl(a.url) ?? 0));
+  candidates.sort((a, b) => Math.max(pinterestImageQuality(b.url), b.width ?? 0) - Math.max(pinterestImageQuality(a.url), a.width ?? 0));
   const best = candidates[0]!;
-  const urlWidth = imageWidthFromUrl(best.url);
-  const sourceWidth = urlWidth === Number.MAX_SAFE_INTEGER ? null : Math.max(best.width ?? 0, urlWidth ?? 0) || null;
-  const shouldPromote = urlWidth !== null && urlWidth !== Number.MAX_SAFE_INTEGER && urlWidth < FALLBACK_PINTEREST_IMAGE_WIDTH;
-  const imageUrl = shouldPromote
-    ? promoteToLargePinterestImage(best.url)
+  const bestQuality = pinterestImageQuality(best.url);
+  const knownDimensions = candidates
+    .filter((candidate) => candidate.width && candidate.height)
+    .sort((a, b) => Math.max(b.width ?? 0, pinterestImageQuality(b.url)) - Math.max(a.width ?? 0, pinterestImageQuality(a.url)))[0];
+  const imageUrl = bestQuality > 0 && bestQuality < Number.MAX_SAFE_INTEGER
+    ? promoteToLargestPinterestImage(best.url)
     : best.url;
-  const width = sourceWidth === null ? null : urlWidth === null ? sourceWidth : Math.max(sourceWidth, FALLBACK_PINTEREST_IMAGE_WIDTH);
-  const height = best.height && (!shouldPromote || (pin.width ?? 0) >= FALLBACK_PINTEREST_IMAGE_WIDTH)
-    ? best.height
-    : pin.width && pin.height && width
-      ? Math.round(pin.height * width / pin.width)
-      : best.height;
+  const knownWidth = Math.max(...candidates.map((candidate) => {
+    const urlWidth = imageWidthFromUrl(candidate.url);
+    return Math.max(candidate.width ?? 0, urlWidth === Number.MAX_SAFE_INTEGER ? 0 : urlWidth ?? 0);
+  }), 0);
+  const width = bestQuality === Number.MAX_SAFE_INTEGER
+    ? Math.max(knownWidth, FALLBACK_PINTEREST_IMAGE_WIDTH)
+    : Math.max(best.width ?? 0, imageWidthFromUrl(best.url) ?? 0, bestQuality > 0 ? FALLBACK_PINTEREST_IMAGE_WIDTH : 0);
+  const aspectWidth = knownDimensions?.width ?? pin.width ?? null;
+  const aspectHeight = knownDimensions?.height ?? pin.height ?? null;
+  const height = aspectWidth && aspectHeight ? Math.round(aspectHeight * width / aspectWidth) : best.height ?? null;
   return { imageUrl, width: width || null, height };
 }
 
 export function derivePreviewUrl(pin: NormalizedPin): string | null {
   if (!pin.previewUrl) return null;
-  return promoteToLargePinterestImage(pin.previewUrl);
+  return promoteToLargestPinterestImage(pin.previewUrl);
 }

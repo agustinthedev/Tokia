@@ -5,7 +5,8 @@ import {
   normalizePinimgImageKey,
   normalizePinterestBoardUrl,
   normalizePinterestPinUrl,
-  chooseBestImageUrl
+  chooseBestImageUrl,
+  pinterestImageCandidates
 } from './normalization.js';
 
 describe('Pinterest URL normalization', () => {
@@ -46,7 +47,7 @@ describe('Pinterest URL normalization', () => {
     expect(pin.imageUrl).toContain('poster.jpg');
   });
 
-  it('promotes small Pinterest sources to the large source and scales dimensions', () => {
+  it('promotes Pinterest sources to originals and scales known dimensions', () => {
     const pin = normalizePin({
       externalId: 'small-source',
       pinUrl: 'https://www.pinterest.com/pin/small-source/',
@@ -55,9 +56,37 @@ describe('Pinterest URL normalization', () => {
       height: 419
     });
     expect(chooseBestImageUrl(pin)).toMatchObject({
-      imageUrl: 'https://i.pinimg.com/736x/aa/bb/cc/photo.jpg',
+      imageUrl: 'https://i.pinimg.com/originals/aa/bb/cc/photo.jpg',
       width: 736,
       height: 1307
     });
+  });
+
+  it('prefers an originals variant over numeric CDN variants', () => {
+    const pin = normalizePin({
+      externalId: 'original-source',
+      pinUrl: 'https://www.pinterest.com/pin/original-source/',
+      imageUrl: 'https://i.pinimg.com/736x/aa/bb/cc/photo.jpg',
+      width: 736,
+      height: 1104,
+      imageVariants: [
+        { url: 'https://i.pinimg.com/1200x/aa/bb/cc/photo.jpg', width: 1200 },
+        { url: 'https://i.pinimg.com/originals/aa/bb/cc/photo.jpg' }
+      ]
+    });
+    expect(chooseBestImageUrl(pin)).toMatchObject({
+      imageUrl: 'https://i.pinimg.com/originals/aa/bb/cc/photo.jpg',
+      width: 1200,
+      height: 1800
+    });
+  });
+
+  it('keeps numeric Pinterest fallbacks behind originals for resilient downloads', () => {
+    expect(pinterestImageCandidates('https://i.pinimg.com/originals/aa/bb/cc/photo.jpg')).toEqual([
+      'https://i.pinimg.com/originals/aa/bb/cc/photo.jpg',
+      'https://i.pinimg.com/1200x/aa/bb/cc/photo.jpg',
+      'https://i.pinimg.com/1000x/aa/bb/cc/photo.jpg',
+      'https://i.pinimg.com/736x/aa/bb/cc/photo.jpg'
+    ]);
   });
 });

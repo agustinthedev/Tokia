@@ -142,15 +142,15 @@ El schema actual es la versión `1`. El board requiere nombre y URL Pinterest no
     {
       "externalId": "123456789012345678",
       "pinUrl": "https://www.pinterest.com/pin/123456789012345678/",
-      "imageUrl": "https://i.pinimg.com/736x/ab/cd/ef/image.jpg",
-      "previewUrl": "https://i.pinimg.com/236x/ab/cd/ef/image.jpg",
-      "imageVariants": [{ "url": "https://i.pinimg.com/736x/ab/cd/ef/image.jpg", "width": 736 }],
+      "imageUrl": "https://i.pinimg.com/originals/ab/cd/ef/image.jpg",
+      "previewUrl": "https://i.pinimg.com/originals/ab/cd/ef/image.jpg",
+      "imageVariants": [{ "url": "https://i.pinimg.com/originals/ab/cd/ef/image.jpg" }],
       "title": "Luxury yacht",
       "description": null,
       "altText": "White yacht in Monaco",
       "sourceLink": null,
-      "width": 736,
-      "height": 1104
+      "width": 1200,
+      "height": 1800
     }
   ]
 }

@@ -6,6 +6,7 @@ import {
   normalizePin,
   normalizePinterestBoardUrl,
   chooseBestImageUrl,
+  pinterestImageQuality,
   isPlayableVideoUrl,
   cleanOptionalText,
   type NormalizedPin,
@@ -175,7 +176,8 @@ function updateAsset(db: Database.Database, existing: AssetRow, pin: NormalizedP
   const best = chooseBestImageUrl(pin);
   const nextMediaType = pin.mediaType ?? existing.media_type;
   const existingMediaUrl = nextMediaType === 'video' && !isPlayableVideoUrl(existing.remote_media_url) ? null : existing.remote_media_url;
-  const useIncomingImage = (existing.width === null && best.width !== null) ||
+  const useIncomingImage = pinterestImageQuality(best.imageUrl) > pinterestImageQuality(existing.remote_image_url) ||
+    (existing.width === null && best.width !== null) ||
     (best.width !== null && (existing.width === null || best.width > existing.width));
   const next = {
     remote_image_url: useIncomingImage ? best.imageUrl : existing.remote_image_url,
