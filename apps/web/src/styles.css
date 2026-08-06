@@ -376,3 +376,22 @@ h1, h2, h3, .brand { font-family: 'Space Grotesk', 'DM Sans', ui-sans-serif, sys
 .asset-grid-column { display: grid; align-content: start; gap: 14px; min-width: 0; }
 .asset-card { margin-bottom: 0; }
 @media (max-width: 580px) { .asset-grid, .asset-grid-column { gap: 8px; } }
+
+/* Keep project actions in the card footer instead of floating over the update date. */
+.project-card { display: flex; flex-direction: column; }
+.project-card-main { flex: 1; }
+.project-footer { margin-top: 0; padding: 13px 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 14px; }
+.project-footer > span:nth-child(2) { text-align: right; white-space: nowrap; }
+.card-edit { position: static; grid-column: 2; justify-self: end; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--surface); color: var(--muted); font-size: 10px; }
+.card-edit:hover { color: var(--violet); border-color: rgba(116,97,244,.35); }
+.project-danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 20px; border-color: rgba(255,125,145,.2); background: rgba(255,125,145,.035); }
+.project-danger-zone h2 { margin-top: 5px; }
+.project-danger-zone p { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.danger-callout { border: 1px solid rgba(255,125,145,.22); border-radius: 11px; padding: 13px; color: var(--muted); background: rgba(255,125,145,.06); font-size: 12px; line-height: 1.5; margin-bottom: 18px; }
+.danger-callout strong { color: var(--red); }
+.danger-callout p { margin-top: 4px; }
+
+@media (max-width: 580px) {
+  .project-danger-zone { align-items: flex-start; flex-direction: column; }
+  .project-danger-zone .button { width: 100%; }
+}

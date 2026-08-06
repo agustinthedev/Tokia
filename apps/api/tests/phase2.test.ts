@@ -118,13 +118,16 @@ describe('Phase 2 management API', () => {
     expect(search.json().projects[0].name).toBe('Launch Plan');
 
     const archived = await app.inject({
-      method: 'PATCH',
+      method: 'DELETE',
       url: `/api/projects/${project.id}`,
       headers: { 'x-local-integration-token': token },
-      payload: { status: 'archived' }
     });
     expect(archived.statusCode).toBe(200);
     expect(archived.json().status).toBe('archived');
+    expect(db!.prepare('SELECT status, archived_at FROM projects WHERE id = ?').get(project.id)).toMatchObject({ status: 'archived' });
+    expect((await app.inject({ method: 'GET', url: '/api/projects?pageSize=100' })).json().items).toHaveLength(0);
+    expect((await app.inject({ method: 'GET', url: '/api/search?q=Launch' })).json().projects).toHaveLength(0);
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${project.id}` })).statusCode).toBe(404);
   });
 
   it('resolves a deferred Pinterest video source on demand', async () => {

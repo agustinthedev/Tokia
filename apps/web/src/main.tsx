@@ -1155,21 +1155,22 @@ function ProjectCard({ project, onEdit }: { project: Project; onEdit: () => void
             <b>{project.readyCount ?? 0}</b> ready
           </span>
         </div>
-        <div className="project-footer">
-          <span>{project.collectionCount} collections</span>
-          <span>Updated {formatDate(project.updatedAt)}</span>
-        </div>
       </button>
-      <button className="card-edit" onClick={onEdit} aria-label="Edit project">
-        <Icon name="edit" />
-      </button>
+      <div className="project-footer">
+        <span>{project.collectionCount} collections</span>
+        <span>Updated {formatDate(project.updatedAt)}</span>
+        <button className="card-edit" onClick={onEdit} aria-label="Edit project">
+          <Icon name="edit" /> Edit
+        </button>
+      </div>
     </article>
   );
 }
 
-function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenContent, refresh = 0 }: { id: string; onEdit: (project: Project) => void; onOpenAsset: (asset: Asset) => void; onCreateContent: (project: Project) => void; onOpenContent: (content: ContentSummary) => void; refresh?: number }): ReactElement {
+function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenContent, onDeleted, refresh = 0 }: { id: string; onEdit: (project: Project) => void; onOpenAsset: (asset: Asset) => void; onCreateContent: (project: Project) => void; onOpenContent: (content: ContentSummary) => void; onDeleted: () => void; refresh?: number }): ReactElement {
   const { data, loading, error } = useApi<Project>(`/api/projects/${id}`, refresh);
   const contents = useApi<{ items: ContentSummary[]; pagination: Pagination }>(`/api/projects/${id}/content?pageSize=50`, refresh);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   if (loading) return <PageLoading />;
   if (error || !data) return <ErrorState message={error ?? "Project not found"} />;
   const project = data;
@@ -1283,7 +1284,59 @@ function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenCon
           <AssetGrid assets={project.recentAssets ?? []} loading={false} error={null} onOpen={onOpenAsset} empty="Connected collections have no available media." />
         </section>
       </div>
+      <section className="panel project-danger-zone">
+        <div>
+          <div className="eyebrow">Project management</div>
+          <h2>Delete project</h2>
+          <p>This hides the project from Tokia while preserving its content, source links, and history in the database.</p>
+        </div>
+        <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+          <Icon name="archive" /> Delete project
+        </Button>
+      </section>
+      {deleteOpen && <ProjectDeleteDialog project={project} onClose={() => setDeleteOpen(false)} onDeleted={onDeleted} />}
     </>
+  );
+}
+
+function ProjectDeleteDialog({ project, onClose, onDeleted }: { project: Project; onClose: () => void; onDeleted: () => void }): ReactElement {
+  const [confirmation, setConfirmation] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const matches = confirmation.trim() === project.name;
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!matches) return;
+    setSaving(true);
+    setError("");
+    try {
+      await request(`/api/projects/${project.id}`, { method: "DELETE" });
+      onDeleted();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete project");
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title="Delete project" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="danger-callout">
+          <strong>This is a soft delete.</strong>
+          <p>The project and its related data will remain in the database, but the project will no longer appear in the normal UI.</p>
+        </div>
+        <label className="form-field">
+          <span>Type the project name to confirm</span>
+          <input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder={project.name} />
+        </label>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="modal-footer">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="danger" type="submit" disabled={!matches || saving}>
+            {saving ? "Deleting…" : "Delete project"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -3069,6 +3122,10 @@ function App(): ReactElement {
       <ProjectDetailPage
         id={route.id}
         refresh={projectRefresh}
+        onDeleted={() => {
+          setProjectRefresh((value) => value + 1);
+          navigate("/projects");
+        }}
         onEdit={(project) => setProjectDialog(project)}
         onOpenAsset={setAsset}
         onCreateContent={(project) => setContentWizard({ project })}

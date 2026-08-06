@@ -451,7 +451,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
 
   app.get('/api/projects', { schema: { tags: ['projects'], summary: 'List projects' } }, async (request) => {
     const query = queryOf(request); const page = positiveInt(query.page, 1, 100_000); const pageSize = positiveInt(query.pageSize, 24, 100);
-    const clauses = ['1 = 1']; const params: unknown[] = [];
+    const clauses = [query.includeArchived === 'true' || query.status === 'archived' ? '1 = 1' : "p.status != 'archived'"]; const params: unknown[] = [];
     if (query.search?.trim()) { clauses.push('LOWER(p.name) LIKE LOWER(?)'); params.push(`%${query.search.trim()}%`); }
     if (query.status) { clauses.push('p.status = ?'); params.push(query.status); }
     const where = clauses.join(' AND ');
@@ -467,7 +467,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
 
   app.get('/api/projects/:id', { schema: { tags: ['projects'], summary: 'Get project details' } }, async (request, reply) => {
     const { id } = request.params as { id: string }; const project = projectSnapshot(db, id);
-    if (!project) return reply.code(404).send({ error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
+    if (!project || project.status === 'archived') return reply.code(404).send({ error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
     return project;
   });
 
@@ -537,7 +537,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
 
   app.get('/api/projects/:id/summary', { schema: { tags: ['projects'], summary: 'Get project summary' } }, async (request, reply) => {
     const { id } = request.params as { id: string }; const project = projectSnapshot(db, id);
-    if (!project) return reply.code(404).send({ error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
+    if (!project || project.status === 'archived') return reply.code(404).send({ error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' } });
     return project;
   });
 
@@ -669,7 +669,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
     const q = queryOf(request).q?.trim() ?? ''; if (!q) return { query: '', collections: [], assets: [], projects: [] }; const value = `%${q}%`;
     const collections = db.prepare(`SELECT c.*, COUNT(ca.asset_id) AS asset_count FROM collections c LEFT JOIN collection_assets ca ON ca.collection_id = c.id WHERE LOWER(COALESCE(c.local_title, c.name)) LIKE LOWER(?) OR LOWER(COALESCE(c.local_description, c.description, '')) LIKE LOWER(?) GROUP BY c.id ORDER BY c.updated_at DESC LIMIT 8`).all(value, value) as Row[];
     const assets = db.prepare(`SELECT a.*, GROUP_CONCAT(DISTINCT COALESCE(c.local_title, c.name)) AS collection_name FROM assets a LEFT JOIN collection_assets ca ON ca.asset_id = a.id LEFT JOIN collections c ON c.id = ca.collection_id WHERE LOWER(COALESCE(a.title,'')) LIKE LOWER(?) OR LOWER(COALESCE(a.description,'')) LIKE LOWER(?) OR LOWER(COALESCE(a.external_asset_id,'')) LIKE LOWER(?) GROUP BY a.id ORDER BY a.last_seen_at DESC LIMIT 8`).all(value, value, value) as Row[];
-    const projects = db.prepare('SELECT * FROM projects WHERE LOWER(name) LIKE LOWER(?) OR LOWER(COALESCE(description, \'\')) LIKE LOWER(?) ORDER BY updated_at DESC LIMIT 8').all(value, value) as Row[];
+    const projects = db.prepare("SELECT * FROM projects WHERE status != 'archived' AND (LOWER(name) LIKE LOWER(?) OR LOWER(COALESCE(description, '')) LIKE LOWER(?)) ORDER BY updated_at DESC LIMIT 8").all(value, value) as Row[];
     return { query: q, collections: collections.map(toCollection), assets: assets.map(toAsset), projects: projects.map(toProject) };
   });
 
