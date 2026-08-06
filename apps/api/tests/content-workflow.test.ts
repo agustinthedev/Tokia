@@ -62,6 +62,12 @@ describe('project and content workflow', () => {
     const download = await app.inject({ method: 'GET', url: `/api/content/${contentId}/package.zip` });
     expect(download.statusCode).toBe(200);
     expect(download.headers['content-type']).toContain('application/zip');
+    const finalDownload = await app.inject({ method: 'GET', url: `/api/content/${contentId}/download` });
+    expect(finalDownload.statusCode).toBe(200);
+    expect(finalDownload.headers['content-type']).toContain('application/zip');
+    expect(finalDownload.headers['content-disposition']).toMatch(/filename="[^"]+-slides\.zip"/);
+    expect(finalDownload.body).toContain('slide-01.png');
+    expect(finalDownload.body).toContain('slide-05.png');
     const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 3, includeCover: true, includeCta: false, textMode: 'none', video: { secondsPerImage: 0.5, fps: 24, outputResolution: '720p' } } } });
     const videoId = videoDraft.json().id as string;
     await app.inject({ method: 'POST', url: `/api/content/${videoId}/images/select`, headers, payload: {} });

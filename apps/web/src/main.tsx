@@ -2278,7 +2278,7 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
           ...(config.includeCta ? ["cta"] : []),
         ];
   const contentSlides = type === "single_image" ? 1 : Math.max(0, Number(config.totalFrames) - Number(Boolean(config.includeCover)) - Number(Boolean(config.includeCta)));
-  const previewAsset = content?.assets.find((asset) => asset.variant === "preview" && (asset.assetType === "video" || asset.assetType === "image"));
+  const previewAsset = content?.assets.find((asset) => asset.variant === "preview" && asset.assetType === (content.type === "video_slideshow" ? "video" : "image"));
   const stepLabels = ["Type", "Sources", "Structure", "Content", "Visuals", "Text", "Preview"];
   return (
     <Modal title={existingId ? "Continue content draft" : "Create content"} onClose={close} wide>
@@ -2784,7 +2784,18 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
           {previewAsset ? (
             <div className="preview-workspace">
               <div className="preview-main">
-                <img src={`${API_BASE}${previewAsset.previewUrl}`} alt="Generated preview" />
+                {previewAsset.assetType === "video" ? (
+                  <video
+                    src={`${API_BASE}${previewAsset.previewUrl}`}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    aria-label="Generated video preview"
+                    style={{ maxWidth: "100%", maxHeight: 540, objectFit: "contain" }}
+                  />
+                ) : (
+                  <img src={`${API_BASE}${previewAsset.previewUrl}`} alt="Generated preview" />
+                )}
               </div>
               <div className="preview-meta">
                 <StatusBadge value={content?.status ?? "draft"} />
@@ -2827,9 +2838,9 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
           {content?.status === "ready" && (
             <div className="ready-actions">
               <Button variant="primary" onClick={() => window.open(`${API_BASE}/api/content/${content.id}/download`, "_blank")}>
-                Download final
+                {content.type === "video_slideshow" ? "Download MP4" : content.type === "carousel" ? "Download slides (ZIP)" : "Download final"}
               </Button>
-              <Button onClick={() => window.open(`${API_BASE}/api/content/${content.id}/package.zip`, "_blank")}>Download package</Button>
+              <Button onClick={() => window.open(`${API_BASE}/api/content/${content.id}/package.zip`, "_blank")}>Download package (ZIP)</Button>
             </div>
           )}
         </div>
