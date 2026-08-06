@@ -1,0 +1,25 @@
+import { describe, expect, it } from 'vitest';
+import { contentFrameCount, frameRoles, mergeConfiguration } from '../src/content-model.js';
+import { generateNarrative, validateNarrative } from '../src/narrative.js';
+
+describe('content model and narrative contract', () => {
+  it('counts cover and CTA inside the requested total', () => {
+    const configuration = mergeConfiguration({ totalFrames: 5, includeCover: true, includeCta: true });
+    expect(frameRoles('carousel', configuration).map((frame) => frame.role)).toEqual(['cover', 'content', 'content', 'content', 'cta']);
+    expect(contentFrameCount('carousel', configuration)).toBe(3);
+    expect(frameRoles('single_image', configuration)).toEqual([{ position: 1, role: 'title_and_summary' }]);
+  });
+
+  it('validates ordered roles and text-mode restrictions', () => {
+    const configuration = mergeConfiguration({ totalFrames: 3, includeCover: true, includeCta: false, textMode: 'cover_only' });
+    const roles = frameRoles('carousel', configuration);
+    const narrative = generateNarrative({ type: 'carousel', language: 'English', niche: 'Fitness', projectDescription: '', topic: 'Mobility', tone: 'educational', audience: '', customInstructions: '', ctaMode: 'ai', ctaText: '', textMode: 'cover_only', roles });
+    expect(narrative.frames.map((frame) => [frame.role, frame.headline, frame.body])).toEqual([
+      ['cover', expect.any(String), null],
+      ['content', null, null],
+      ['content', null, null]
+    ]);
+    expect(validateNarrative(narrative, roles, configuration).frames).toHaveLength(3);
+    expect(() => validateNarrative({ ...narrative, frames: narrative.frames.map((frame, index) => index === 1 ? { ...frame, headline: 'Not allowed' } : frame) }, roles, configuration)).toThrow('cover_only');
+  });
+});

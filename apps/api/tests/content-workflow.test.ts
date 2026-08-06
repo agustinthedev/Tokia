@@ -1,0 +1,85 @@
+import { createServer, type Server } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { promises as fsp } from 'node:fs';
+import { afterEach, describe, expect, it } from 'vitest';
+import { buildApp } from '../src/app.js';
+import { config } from '../src/config.js';
+import { createDatabase } from '../src/db.js';
+import type Database from 'better-sqlite3';
+
+const token = 'content-test-token';
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+
+describe('project and content workflow', () => {
+  let db: Database.Database | undefined;
+  let app: Awaited<ReturnType<typeof buildApp>> | undefined;
+  let server: Server | undefined;
+  let storage: string | undefined;
+
+  afterEach(async () => {
+    if (app) await app.close();
+    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+    if (db?.open) db.close();
+    if (storage) await fsp.rm(storage, { recursive: true, force: true });
+    app = undefined; db = undefined; server = undefined; storage = undefined;
+  });
+
+  it('creates a project, generates a five-frame carousel, renders final assets, and packages them', async () => {
+    server = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'image/png' }); response.end(png); });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', () => resolve()));
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Could not start fixture server');
+    const imageUrl = `http://127.0.0.1:${address.port}/image.png`;
+    storage = await fsp.mkdtemp(path.join(os.tmpdir(), 'tokia-content-'));
+    db = createDatabase(':memory:'); app = await buildApp({ db, settings: { ...config, localIntegrationToken: token, contentStorageDirectory: storage, ffmpegPath: 'ffmpeg' } });
+    const headers = { 'x-local-integration-token': token };
+    const imported = await app.inject({ method: 'POST', url: '/api/imports/pinterest-board', headers, payload: { schemaVersion: 1, source: 'test', exportedAt: new Date().toISOString(), board: { externalId: 'content-board', name: 'Content board', url: 'https://www.pinterest.com/test/content-board/', description: null }, pins: Array.from({ length: 5 }, (_, index) => ({ externalId: `content-${index}`, pinUrl: `https://www.pinterest.com/pin/content-${index}/`, imageUrl, previewUrl: imageUrl, width: 800, height: 1200 })) } });
+    expect(imported.statusCode).toBe(200);
+    const collectionId = imported.json().collection.id as string;
+    const createdProject = await app.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: 'Fitness tips', niche: 'Fitness', description: 'Practical movement ideas', defaultLanguage: 'English', collectionIds: [collectionId], defaultSettings: { aspectRatio: '9:16', tone: 'educational' } } });
+    expect(createdProject.statusCode).toBe(201);
+    const projectId = createdProject.json().id as string;
+    const draftResponse = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'carousel', configuration: { sourceCollectionIds: [collectionId], totalFrames: 5, includeCover: true, includeCta: true, textMode: 'headline_and_body', topic: 'A simple mobility routine' } } });
+    expect(draftResponse.statusCode).toBe(201);
+    const contentId = draftResponse.json().id as string;
+    expect(draftResponse.json().frames.map((frame: { role: string }) => frame.role)).toEqual(['cover', 'content', 'content', 'content', 'cta']);
+    const selected = await app.inject({ method: 'POST', url: `/api/content/${contentId}/images/select`, headers, payload: {} });
+    expect(selected.statusCode).toBe(200);
+    expect(selected.json().frames.every((frame: { sourceMedia: unknown }) => Boolean(frame.sourceMedia))).toBe(true);
+    await app.inject({ method: 'POST', url: `/api/content/${contentId}/narrative`, headers, payload: {} });
+    await waitFor(async () => (await app!.inject({ method: 'GET', url: `/api/content/${contentId}` })).json().narrative?.frames?.length === 5);
+    const narrative = (await app.inject({ method: 'GET', url: `/api/content/${contentId}` })).json();
+    expect(narrative.narrative.frames).toHaveLength(5);
+    expect(narrative.narrative.frames.map((frame: { role: string }) => frame.role)).toEqual(['cover', 'content', 'content', 'content', 'cta']);
+    const preview = await app.inject({ method: 'POST', url: `/api/content/${contentId}/preview`, headers, payload: {} });
+    expect(preview.statusCode).toBe(202);
+    await waitFor(async () => (await app!.inject({ method: 'GET', url: `/api/content/${contentId}` })).json().status === 'preview_ready', 20_000);
+    const readyPreview = (await app.inject({ method: 'GET', url: `/api/content/${contentId}` })).json();
+    expect(readyPreview.assets.some((asset: { variant: string }) => asset.variant === 'preview')).toBe(true);
+    const confirmed = await app.inject({ method: 'POST', url: `/api/content/${contentId}/confirm`, headers, payload: {} });
+    expect(confirmed.statusCode).toBe(202);
+    await waitFor(async () => (await app!.inject({ method: 'GET', url: `/api/content/${contentId}` })).json().status === 'ready', 20_000);
+    const download = await app.inject({ method: 'GET', url: `/api/content/${contentId}/package.zip` });
+    expect(download.statusCode).toBe(200);
+    expect(download.headers['content-type']).toContain('application/zip');
+    const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 3, includeCover: true, includeCta: false, textMode: 'none', video: { secondsPerImage: 0.5, fps: 24, outputResolution: '720p' } } } });
+    const videoId = videoDraft.json().id as string;
+    await app.inject({ method: 'POST', url: `/api/content/${videoId}/images/select`, headers, payload: {} });
+    await app.inject({ method: 'POST', url: `/api/content/${videoId}/narrative`, headers, payload: {} });
+    await waitFor(async () => Boolean((await app!.inject({ method: 'GET', url: `/api/content/${videoId}` })).json().narrative), 5_000);
+    await app.inject({ method: 'POST', url: `/api/content/${videoId}/preview`, headers, payload: {} });
+    await waitFor(async () => {
+      const state = (await app!.inject({ method: 'GET', url: `/api/content/${videoId}` })).json();
+      if (state.status === 'failed') throw new Error(`Video preview failed: ${JSON.stringify(state)}`);
+      return state.status === 'preview_ready';
+    }, 20_000);
+    const videoPreview = (await app.inject({ method: 'GET', url: `/api/content/${videoId}` })).json();
+    expect(videoPreview.assets.some((asset: { variant: string; mimeType: string }) => asset.variant === 'preview' && asset.mimeType === 'video/mp4')).toBe(true);
+  }, 60_000);
+});
+
+async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 100)); }
+  throw new Error('Timed out waiting for background job');
+}
