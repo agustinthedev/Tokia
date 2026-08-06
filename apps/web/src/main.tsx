@@ -199,10 +199,11 @@ if (typeof document !== "undefined") bindPreviewGallery(document);
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = path === "/api/assets?mediaType=image&pageSize=100" ? "/api/assets?mediaType=source&pageSize=100" : path;
+  const hasBody = init?.body !== undefined && init?.body !== null;
   const response = await fetch(`${API_BASE}${apiPath}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
       ...(init?.method && init.method !== "GET" ? { "X-Local-Integration-Token": API_TOKEN } : {}),
     },
