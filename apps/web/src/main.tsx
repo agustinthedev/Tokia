@@ -1167,8 +1167,10 @@ function ProjectCard({ project, onEdit }: { project: Project; onEdit: () => void
   );
 }
 
-function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenContent, onDeleted, refresh = 0 }: { id: string; onEdit: (project: Project) => void; onOpenAsset: (asset: Asset) => void; onCreateContent: (project: Project) => void; onOpenContent: (content: ContentSummary) => void; onDeleted: () => void; refresh?: number }): ReactElement {
+function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenContent, onDeleted, onContentChanged, refresh = 0 }: { id: string; onEdit: (project: Project) => void; onOpenAsset: (asset: Asset) => void; onCreateContent: (project: Project) => void; onOpenContent: (content: ContentSummary) => void; onDeleted: () => void; onContentChanged: () => void; refresh?: number }): ReactElement {
   const { data, loading, error } = useApi<Project>(`/api/projects/${id}`, refresh);
+  const [titleEditor, setTitleEditor] = useState<ContentSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ContentSummary | null>(null);
   const contents = useApi<{ items: ContentSummary[]; pagination: Pagination }>(`/api/projects/${id}/content?pageSize=50`, refresh);
   const [deleteOpen, setDeleteOpen] = useState(false);
   if (loading) return <PageLoading />;
@@ -1217,17 +1219,27 @@ function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenCon
         ) : contents.data?.items.length ? (
           <div className="content-list">
             {contents.data.items.map((item) => (
-              <button className="content-list-row" key={item.id} onClick={() => onOpenContent(item)}>
-                <div className="content-list-thumb">{item.thumbnailUrl ? <img src={`${API_BASE}${item.thumbnailUrl}`} alt="" /> : <span>{item.type === "carousel" ? "▤" : item.type === "video_slideshow" ? "▶" : "▧"}</span>}</div>
-                <div className="content-list-copy">
-                  <strong>{item.title ?? item.topic ?? "Untitled draft"}</strong>
-                  <span>
-                    {item.type.replaceAll("_", " ")} · {item.frameCount} frames · updated {formatDate(item.updatedAt)}
-                  </span>
+              <div className="content-list-row" key={item.id}>
+                <button className="content-list-main" onClick={() => onOpenContent(item)}>
+                  <div className="content-list-thumb">{item.thumbnailUrl ? <img src={`${API_BASE}${item.thumbnailUrl}`} alt="" /> : <span>{item.type === "carousel" ? "▤" : item.type === "video_slideshow" ? "▶" : "▧"}</span>}</div>
+                  <div className="content-list-copy">
+                    <strong>{item.title ?? item.topic ?? "Untitled draft"}</strong>
+                    <span>
+                      {item.type.replaceAll("_", " ")} · {item.frameCount} frames · updated {formatDate(item.updatedAt)}
+                    </span>
+                  </div>
+                  <StatusBadge value={item.status} />
+                  <Icon name="arrow" />
+                </button>
+                <div className="content-list-actions">
+                  <button className="content-action-button" onClick={() => setTitleEditor(item)} aria-label={`Edit title for ${item.title ?? item.topic ?? "content"}`}>
+                    <Icon name="edit" /> Edit title
+                  </button>
+                  <button className="content-action-button content-action-danger" onClick={() => setDeleteTarget(item)} aria-label={`Delete ${item.title ?? item.topic ?? "content"}`}>
+                    <Icon name="archive" /> Delete
+                  </button>
                 </div>
-                <StatusBadge value={item.status} />
-                <Icon name="arrow" />
-              </button>
+              </div>
             ))}
           </div>
         ) : (
@@ -1295,6 +1307,8 @@ function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenCon
         </Button>
       </section>
       {deleteOpen && <ProjectDeleteDialog project={project} onClose={() => setDeleteOpen(false)} onDeleted={onDeleted} />}
+      {titleEditor && <ContentTitleDialog content={titleEditor} onClose={() => setTitleEditor(null)} onSaved={() => { setTitleEditor(null); onContentChanged(); }} />}
+      {deleteTarget && <ContentDeleteDialog content={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={() => { setDeleteTarget(null); onContentChanged(); }} />}
     </>
   );
 }
@@ -1333,6 +1347,88 @@ function ProjectDeleteDialog({ project, onClose, onDeleted }: { project: Project
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="danger" type="submit" disabled={!matches || saving}>
             {saving ? "Deleting…" : "Delete project"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ContentTitleDialog({ content, onClose, onSaved }: { content: ContentSummary; onClose: () => void; onSaved: () => void }): ReactElement {
+  const [title, setTitle] = useState(content.title ?? content.topic ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim()) {
+      setError("A content title is required.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await request(`/api/content/${content.id}`, { method: "PATCH", body: JSON.stringify({ title: title.trim() }) });
+      onSaved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update content title");
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title="Edit content title" onClose={onClose}>
+      <form onSubmit={submit}>
+        <label className="form-field">
+          <span>Content title</span>
+          <input autoFocus maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Evening routine" />
+        </label>
+        <div className="inline-note">This changes the title shown in the project. The caption and generated copy remain unchanged.</div>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="modal-footer">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={saving || !title.trim()}>
+            {saving ? "Saving…" : "Save title"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ContentDeleteDialog({ content, onClose, onDeleted }: { content: ContentSummary; onClose: () => void; onDeleted: () => void }): ReactElement {
+  const displayTitle = content.title ?? content.topic ?? "Untitled draft";
+  const [confirmation, setConfirmation] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const matches = confirmation.trim() === displayTitle;
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!matches) return;
+    setSaving(true);
+    setError("");
+    try {
+      await request(`/api/content/${content.id}`, { method: "DELETE" });
+      onDeleted();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete content");
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title="Delete content" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="danger-callout">
+          <strong>This is a soft delete.</strong>
+          <p>The content and its generated assets remain in the database, but this item will no longer appear in the project.</p>
+        </div>
+        <label className="form-field">
+          <span>Type the content title to confirm</span>
+          <input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder={displayTitle} />
+        </label>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="modal-footer">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="danger" type="submit" disabled={!matches || saving}>
+            {saving ? "Deleting…" : "Delete content"}
           </Button>
         </div>
       </form>
@@ -3126,6 +3222,7 @@ function App(): ReactElement {
           setProjectRefresh((value) => value + 1);
           navigate("/projects");
         }}
+        onContentChanged={() => setProjectRefresh((value) => value + 1)}
         onEdit={(project) => setProjectDialog(project)}
         onOpenAsset={setAsset}
         onCreateContent={(project) => setContentWizard({ project })}

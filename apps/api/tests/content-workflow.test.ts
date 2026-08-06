@@ -43,12 +43,16 @@ describe('project and content workflow', () => {
     expect(draftResponse.statusCode).toBe(201);
     const contentId = draftResponse.json().id as string;
     expect(draftResponse.json().frames.map((frame: { role: string }) => frame.role)).toEqual(['cover', 'content', 'content', 'content', 'cta']);
+    const titleUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${contentId}`, headers, payload: { title: 'Mobility routine' } });
+    expect(titleUpdate.statusCode).toBe(200);
+    expect(titleUpdate.json().title).toBe('Mobility routine');
     const selected = await app.inject({ method: 'POST', url: `/api/content/${contentId}/images/select`, headers, payload: {} });
     expect(selected.statusCode).toBe(200);
     expect(selected.json().frames.every((frame: { sourceMedia: unknown }) => Boolean(frame.sourceMedia))).toBe(true);
     await app.inject({ method: 'POST', url: `/api/content/${contentId}/narrative`, headers, payload: {} });
     await waitFor(async () => (await app!.inject({ method: 'GET', url: `/api/content/${contentId}` })).json().narrative?.frames?.length === 5);
     const narrative = (await app.inject({ method: 'GET', url: `/api/content/${contentId}` })).json();
+    expect(narrative.title).toBe('Mobility routine');
     expect(narrative.narrative.frames).toHaveLength(5);
     expect(narrative.narrative.frames.map((frame: { role: string }) => frame.role)).toEqual(['cover', 'content', 'content', 'content', 'cta']);
     const preview = await app.inject({ method: 'POST', url: `/api/content/${contentId}/preview`, headers, payload: {} });
@@ -81,6 +85,11 @@ describe('project and content workflow', () => {
     }, 20_000);
     const videoPreview = (await app.inject({ method: 'GET', url: `/api/content/${videoId}` })).json();
     expect(videoPreview.assets.some((asset: { variant: string; mimeType: string }) => asset.variant === 'preview' && asset.mimeType === 'video/mp4')).toBe(true);
+    const archivedVideo = await app.inject({ method: 'DELETE', url: `/api/content/${videoId}`, headers });
+    expect(archivedVideo.statusCode).toBe(200);
+    expect(archivedVideo.json().status).toBe('archived');
+    expect((await app.inject({ method: 'GET', url: `/api/content/${videoId}` })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${projectId}/content?pageSize=50` })).json().items.some((item: { id: string }) => item.id === videoId)).toBe(false);
   }, 60_000);
 
   it('allows video source media in the content selection step', async () => {

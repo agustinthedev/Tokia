@@ -548,7 +548,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
   }
   function contentExists(contentId: string): Row {
     const content = contentSnapshot(db, contentId);
-    if (!content) throw new ContentValidationError('CONTENT_NOT_FOUND', 'Content item not found.');
+    if (!content || content.status === 'archived') throw new ContentValidationError('CONTENT_NOT_FOUND', 'Content item not found.');
     return content;
   }
   function assertContentEditable(content: Row): void {
@@ -575,7 +575,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
   });
 
   app.get('/api/content/:id', { schema: { tags: ['content'], summary: 'Get content detail' } }, async (request, reply) => {
-    const { id } = request.params as { id: string }; const content = contentSnapshot(db, id); if (!content) return reply.code(404).send({ error: { code: 'CONTENT_NOT_FOUND', message: 'Content item not found' } }); return content;
+    const { id } = request.params as { id: string }; const content = contentSnapshot(db, id); if (!content || content.status === 'archived') return reply.code(404).send({ error: { code: 'CONTENT_NOT_FOUND', message: 'Content item not found' } }); return content;
   });
 
   app.patch('/api/content/:id', { schema: { tags: ['content'], summary: 'Update content draft' } }, async (request, reply) => {

@@ -91,6 +91,7 @@ export function createContentDraft(db: Database.Database, options: { projectId: 
 export function updateContent(db: Database.Database, contentId: string, body: Row): Row {
   const row = contentRow(db, contentId);
   if (!row) throw new ContentValidationError('CONTENT_NOT_FOUND', 'Content item not found.');
+  if (row.status === 'archived') throw new ContentValidationError('CONTENT_NOT_FOUND', 'Content item not found.');
   if (['generation_queued', 'generating'].includes(String(row.status))) throw new ContentValidationError('CONTENT_BUSY', 'Final generation is running; wait for it to finish before editing.');
   const current = contentConfiguration(row);
   const next = body.configuration === undefined ? current : mergeConfiguration(body.configuration, current);
