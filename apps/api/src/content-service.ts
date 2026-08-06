@@ -36,7 +36,7 @@ export function contentSnapshot(db: Database.Database, contentId: string): Row |
     FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id
     LEFT JOIN collection_assets ca ON ca.asset_id = a.id LEFT JOIN collections c ON c.id = ca.collection_id
     WHERE f.content_id = ? GROUP BY f.id ORDER BY f.position`).all(contentId) as Row[]).map((frame) => ({
-      id: frame.id, position: frame.position, role: frame.role, headline: frame.headline, body: frame.body,
+      id: frame.id, position: frame.position, role: frame.source_media_type && frame.role !== 'cta' ? `${frame.role} (${frame.source_media_type === 'video' ? 'video' : 'image'})` : frame.role, headline: frame.headline, body: frame.body,
       textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), settings: parseJson(frame.settings_json, {}),
       sourceMedia: frame.source_media_id ? { id: frame.source_media_id, externalId: frame.external_asset_id, imageUrl: frame.remote_image_url, previewUrl: frame.remote_preview_url, mediaUrl: frame.remote_media_url ?? frame.remote_image_url, width: frame.source_width, height: frame.source_height, mediaType: frame.source_media_type, title: frame.source_title, altText: frame.source_alt_text, collectionName: frame.source_collection_name } : null
     }));

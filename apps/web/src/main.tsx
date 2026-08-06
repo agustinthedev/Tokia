@@ -23,7 +23,8 @@ const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3000').repla
 const API_TOKEN = import.meta.env.VITE_INTEGRATION_TOKEN ?? 'tokia-local-dev-token';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}), ...(init?.method && init.method !== 'GET' ? { 'X-Local-Integration-Token': API_TOKEN } : {}) } });
+  const apiPath = path === '/api/assets?mediaType=image&pageSize=100' ? '/api/assets?mediaType=source&pageSize=100' : path;
+  const response = await fetch(`${API_BASE}${apiPath}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}), ...(init?.method && init.method !== 'GET' ? { 'X-Local-Integration-Token': API_TOKEN } : {}) } });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
   return normalizeAssetTitles(body) as T;

@@ -76,6 +76,38 @@ describe('project and content workflow', () => {
     const videoPreview = (await app.inject({ method: 'GET', url: `/api/content/${videoId}` })).json();
     expect(videoPreview.assets.some((asset: { variant: string; mimeType: string }) => asset.variant === 'preview' && asset.mimeType === 'video/mp4')).toBe(true);
   }, 60_000);
+
+  it('allows video source media in the content selection step', async () => {
+    db = createDatabase(':memory:');
+    app = await buildApp({ db, settings: { ...config, localIntegrationToken: token } });
+    const headers = { 'x-local-integration-token': token };
+    const imported = await app.inject({ method: 'POST', url: '/api/imports/pinterest-board', headers, payload: {
+      schemaVersion: 1,
+      source: 'test',
+      exportedAt: new Date().toISOString(),
+      board: { externalId: 'video-board', name: 'Video board', url: 'https://www.pinterest.com/test/video-board/', description: null },
+      pins: [{
+        externalId: 'video-source',
+        pinUrl: 'https://www.pinterest.com/pin/video-source/',
+        imageUrl: 'https://i.pinimg.com/736x/aa/bb/cc/video-source.jpg',
+        previewUrl: 'https://i.pinimg.com/236x/aa/bb/cc/video-source.jpg',
+        mediaUrl: 'https://v.pinimg.com/videos/video-source.mp4',
+        mediaType: 'video',
+        mimeType: 'video/mp4',
+        width: 736,
+        height: 1104
+      }]
+    } });
+    const collectionId = imported.json().collection.id as string;
+    const createdProject = await app.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: 'Video sources', niche: 'Travel', collectionIds: [collectionId] } });
+    const projectId = createdProject.json().id as string;
+    const videoAsset = (await app.inject({ method: 'GET', url: `/api/collections/${collectionId}/assets?mediaType=video` })).json().items[0];
+    const draft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'single_image', configuration: { sourceCollectionIds: [collectionId] } } });
+    const selected = await app.inject({ method: 'POST', url: `/api/content/${draft.json().id}/images/select`, headers, payload: { mediaIds: [videoAsset.id] } });
+    expect(selected.statusCode).toBe(200);
+    expect(selected.json().frames[0].sourceMedia).toMatchObject({ mediaType: 'video', width: 736, height: 1104 });
+    expect(selected.json().frames[0].role).toBe('title_and_summary (video)');
+  });
 });
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
