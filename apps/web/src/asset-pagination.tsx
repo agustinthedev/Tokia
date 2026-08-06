@@ -23,6 +23,7 @@ export interface InfiniteAssetsState<T> {
   loadingMore: boolean;
   error: string | null;
   hasMore: boolean;
+  loadMore: () => Promise<void>;
   sentinelRef: RefObject<HTMLDivElement | null>;
 }
 
@@ -44,6 +45,7 @@ export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAss
   const [error, setError] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestVersion = useRef(0);
+  const loadingMoreRef = useRef(false);
 
   const fetchPage = useCallback(async (nextPage: number): Promise<PageResponse<T>> => {
     const response = await fetch(pageUrl(basePath, nextPage));
@@ -59,6 +61,7 @@ export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAss
     setItems([]);
     setPagination(null);
     setPage(0);
+    loadingMoreRef.current = false;
     setLoadingMore(false);
     setError(null);
     setLoading(true);
@@ -77,7 +80,8 @@ export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAss
 
   const hasMore = Boolean(pagination && items.length < pagination.total);
   const loadMore = useCallback(async (): Promise<void> => {
-    if (loading || loadingMore || !pagination || items.length >= pagination.total) return;
+    if (loading || loadingMoreRef.current || !pagination || items.length >= pagination.total) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     setError(null);
     const version = requestVersion.current;
@@ -90,21 +94,33 @@ export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAss
     } catch (caught) {
       if (requestVersion.current === version) setError(caught instanceof Error ? caught.message : 'Could not load more media');
     } finally {
+      loadingMoreRef.current = false;
       if (requestVersion.current === version) setLoadingMore(false);
     }
-  }, [fetchPage, items.length, loading, loadingMore, page, pagination]);
+  }, [fetchPage, items.length, loading, page, pagination]);
 
   useEffect(() => {
     const node = sentinelRef.current;
     if (!node || !hasMore) return;
+    const root = node.closest<HTMLElement>('.main-area');
+    const scrollTarget = root ?? window;
+    const checkScrollPosition = () => {
+      const containerBottom = root?.getBoundingClientRect().bottom ?? window.innerHeight;
+      if (node.getBoundingClientRect().top - containerBottom <= 700) void loadMore();
+    };
     const observer = new IntersectionObserver((entries) => {
       if (entries[0]?.isIntersecting) void loadMore();
-    }, { rootMargin: '700px 0px' });
+    }, { root, rootMargin: '700px 0px' });
     observer.observe(node);
-    return () => observer.disconnect();
+    scrollTarget.addEventListener('scroll', checkScrollPosition, { passive: true });
+    checkScrollPosition();
+    return () => {
+      observer.disconnect();
+      scrollTarget.removeEventListener('scroll', checkScrollPosition);
+    };
   }, [hasMore, loadMore]);
 
-  return { items, pagination, loading, loadingMore, error, hasMore, sentinelRef };
+  return { items, pagination, loading, loadingMore, error, hasMore, loadMore, sentinelRef };
 }
 
 export function InfiniteAssetFooter<T>({ state }: { state: InfiniteAssetsState<T> | null | undefined }): ReactElement | null {
@@ -112,7 +128,7 @@ export function InfiniteAssetFooter<T>({ state }: { state: InfiniteAssetsState<T
   return <div ref={state.sentinelRef} className="asset-load-more">
     {state.loadingMore && <><span className="spinner" /> Loading more media…</>}
     {!state.loadingMore && state.error && <span className="inline-error">{state.error}</span>}
-    {!state.loadingMore && !state.error && state.hasMore && <span>Scroll to load more media</span>}
+    {!state.loadingMore && !state.error && state.hasMore && <button type="button" className="asset-load-more-button" onClick={() => void state.loadMore()}>Scroll to load more media</button>}
     {!state.loadingMore && !state.error && !state.hasMore && <span>All media loaded</span>}
   </div>;
 }

@@ -290,3 +290,5 @@ h2 { color: #263348; font-size: 17px; }
 .asset-load-more { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 54px; margin: 4px 0 18px; color: var(--muted); font-size: 11px; text-align: center; }
 .asset-load-more .spinner { width: 18px; height: 18px; margin: 0; }
 .asset-load-more .inline-error { margin: 0; }
+.asset-load-more-button { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; padding: 12px 18px; }
+.asset-load-more-button:hover { color: var(--blue); }
