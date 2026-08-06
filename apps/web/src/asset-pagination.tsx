@@ -3,6 +3,19 @@ import { useCallback, useEffect, useRef, useState, type ReactElement, type RefOb
 interface Pagination { page: number; pageSize: number; total: number; totalPages: number }
 interface PageResponse<T> { items: T[]; pagination: Pagination }
 
+function parsePageResponse<T>(value: unknown): PageResponse<T> {
+  if (!value || typeof value !== 'object') {
+    throw new Error('The media response was empty. Try again.');
+  }
+
+  const page = value as Partial<PageResponse<T>>;
+  if (!Array.isArray(page.items) || !page.pagination || typeof page.pagination !== 'object') {
+    throw new Error('The media response was invalid. Try again.');
+  }
+
+  return page as PageResponse<T>;
+}
+
 export interface InfiniteAssetsState<T> {
   items: T[];
   pagination: Pagination | null;
@@ -34,7 +47,7 @@ export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAss
     const response = await fetch(pageUrl(basePath, nextPage));
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
-    return body as PageResponse<T>;
+    return parsePageResponse<T>(body);
   }, [basePath]);
 
   useEffect(() => {
@@ -92,8 +105,8 @@ export function useInfiniteAssets<T>(basePath: string, refresh = 0): InfiniteAss
   return { items, pagination, loading, loadingMore, error, hasMore, sentinelRef };
 }
 
-export function InfiniteAssetFooter<T>({ state }: { state: InfiniteAssetsState<T> }): ReactElement | null {
-  if (!state.items.length) return null;
+export function InfiniteAssetFooter<T>({ state }: { state: InfiniteAssetsState<T> | null | undefined }): ReactElement | null {
+  if (!state?.items?.length) return null;
   return <div ref={state.sentinelRef} className="asset-load-more">
     {state.loadingMore && <><span className="spinner" /> Loading more media…</>}
     {!state.loadingMore && state.error && <span className="inline-error">{state.error}</span>}
