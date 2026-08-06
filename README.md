@@ -269,7 +269,7 @@ La suite cubre normalización de URLs, IDs, claves de imágenes, primera importa
 
 ## Phase 2: local media workspace
 
-Phase 2 adds `apps/web`, a React + Vite application connected to the Fastify API. It keeps the local-first boundary intact: the browser talks to the API, and only the API opens SQLite. The interface is a dark, responsive media workspace with a collapsible navigation shell, dashboard, collection galleries, global asset browsing, project management, import diagnostics, global search, and local settings.
+Phase 2 adds `apps/web`, a React + Vite application connected to the Fastify API. It keeps the local-first boundary intact: the browser talks to the API, and only the API opens SQLite. The interface is a light, neon-accented, responsive media workspace with a collapsible navigation shell, dashboard, collection galleries, global asset browsing, project management, import diagnostics, global search, and local settings.
 
 Collections and projects are intentionally different. A collection is an imported or reusable source board with global asset memberships and import history. A project references one or more collections through `project_collections`; it never copies collection assets. This leaves room for future weighting, media-type rules, usage history, randomized selection, and manual replacement.
 
@@ -294,6 +294,8 @@ npm run migrate
 ```
 
 Phase 2 migration `apps/api/migrations/002_phase2.sql` adds separate local collection metadata, cover references, lifecycle timestamps, media type/video metadata, projects, and the project-to-collection relationship. It is additive and safe to run against the Phase 1 SQLite database.
+
+The extension scanner recognizes Pinterest video cards from `<video>`, `<source>`, poster metadata, and embedded `.mp4`/`.webm` URLs. After rebuilding the extension, reload the unpacked extension in Chrome/Brave and re-scan the board; existing assets are matched by Pin ID and updated with video metadata instead of being duplicated.
 
 ### Phase 2 API surface
 

@@ -21,6 +21,19 @@ describe('extension Pinterest scanner', () => {
       .toBe('https://i.pinimg.com/originals/aa/bb/cc/a.jpg');
   });
 
+  it('detects video pins from video sources and poster metadata', () => {
+    const page = dom(`<html><body><h1>Video board</h1><article><a href="/pin/video123/"><video poster="https://i.pinimg.com/236x/aa/bb/cc/video.jpg"><source src="https://v.pinimg.com/videos/video123.mp4" type="video/mp4"></video></a></article></body></html>`);
+    const pins = extractVisiblePins(page.window.document);
+    expect(pins).toHaveLength(1);
+    expect(pins[0]).toMatchObject({
+      externalId: 'video123',
+      imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/video.jpg',
+      mediaUrl: 'https://v.pinimg.com/videos/video123.mp4',
+      mediaType: 'video',
+      mimeType: 'video/mp4'
+    });
+  });
+
   it('deduplicates pins by strong identity while preserving distinct Pin IDs with one image path', () => {
     const pins = [
       { externalId: '1', pinUrl: 'https://www.pinterest.com/pin/1/', imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/same.jpg' },
