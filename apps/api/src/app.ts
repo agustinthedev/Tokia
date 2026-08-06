@@ -309,7 +309,7 @@ export async function buildApp(options: { db?: Database.Database; settings?: App
     const built = buildCollectionsQuery(queryOf(request));
     const total = (db.prepare(`SELECT COUNT(DISTINCT c.id) AS count FROM collections c LEFT JOIN collection_assets ca ON ca.collection_id = c.id LEFT JOIN assets a ON a.id = ca.asset_id WHERE ${built.where}`).get(...built.whereParams) as { count: number }).count;
     const rows = db.prepare(`SELECT c.*, COUNT(ca.asset_id) AS asset_count, SUM(CASE WHEN a.media_type IN ('image','animated') THEN 1 ELSE 0 END) AS image_count, SUM(CASE WHEN a.media_type = 'video' THEN 1 ELSE 0 END) AS video_count,
-      (SELECT COALESCE(a2.remote_preview_url, CASE WHEN a2.media_type = 'image' THEN a2.remote_image_url END) FROM collection_assets ca2 JOIN assets a2 ON a2.id = ca2.asset_id WHERE ca2.collection_id = c.id ORDER BY ca2.last_seen_at DESC LIMIT 1) AS cover_preview_url,
+      (SELECT CASE WHEN a2.media_type IN ('image', 'animated') THEN COALESCE(a2.remote_media_url, a2.remote_image_url, a2.remote_preview_url) ELSE COALESCE(a2.remote_image_url, a2.remote_preview_url) END FROM collection_assets ca2 JOIN assets a2 ON a2.id = ca2.asset_id WHERE ca2.collection_id = c.id ORDER BY ca2.last_seen_at DESC LIMIT 1) AS cover_preview_url,
       (SELECT a2.media_type FROM collection_assets ca2 JOIN assets a2 ON a2.id = ca2.asset_id WHERE ca2.collection_id = c.id ORDER BY ca2.last_seen_at DESC LIMIT 1) AS cover_media_type
       ${built.sql}`).all(...built.params) as Row[];
     return { items: rows.map(toCollection), pagination: pagination(built.page, built.pageSize, total) };
