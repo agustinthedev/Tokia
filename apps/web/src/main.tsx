@@ -329,6 +329,40 @@ function getRoute(): { page: PageKey; id?: string } {
 }
 
 function Icon({ name }: { name: string }): ReactElement {
+  const svgIcons: Record<string, ReactNode> = {
+    home: <><path d="m3 10 9-7 9 7" /><path d="M5 9.5V21h14V9.5" /><path d="M9 21v-6h6v6" /></>,
+    collections: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M4 9h16M9 4v16M15 4v16" /></>,
+    assets: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m7 16 3-3 2 2 2-3 3 4" /><circle cx="9" cy="9" r="1" /></>,
+    projects: <><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2h5A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" /></>,
+    imports: <><path d="M12 3v11" /><path d="m8 10 4 4 4-4" /><path d="M5 20h14" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.1h-2.6v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H6v-2.6h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1L9 6.6l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5v-.1h2.6v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1V14h-.1a1.7 1.7 0 0 0-1.1 1z" /></>,
+    search: <><circle cx="10.8" cy="10.8" r="6.3" /><path d="m16 16 4.2 4.2" /></>,
+    plus: <><path d="M12 5v14M5 12h14" /></>,
+    arrow: <><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></>,
+    filter: <><path d="M4 6h16M7 12h10M10 18h4" /></>,
+    grid: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
+    list: <><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></>,
+    play: <><path d="m8 5 11 7-11 7z" /></>,
+    more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
+    check: <><path d="m5 12 4 4L19 6" /></>,
+    alert: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    image: <><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m7 16 3-3 2 2 2-3 3 4" /><circle cx="9" cy="9" r="1" /></>,
+    video: <><rect x="4" y="6" width="13" height="12" rx="2" /><path d="m17 10 3-2v8l-3-2z" /></>,
+    edit: <><path d="M4 17.5V20h2.5L19 7.5 16.5 5z" /><path d="m14.8 6.2 2.5 2.5" /></>,
+    archive: <><path d="M5 7h14M9 7V5h6v2m-8 0 .8 12h6.4L15 7M10 10v6m4-6v6" /></>,
+    menu: <><path d="M5 7h14M5 12h14M5 17h14" /></>,
+    "arrow-left": <><path d="M19 12H5" /><path d="m11 6-6 6 6 6" /></>,
+    "arrow-right": <><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></>,
+  };
+  const svgIcon = svgIcons[name];
+  if (svgIcon) {
+    return (
+      <span className={`icon icon-${name}`} aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">{svgIcon}</svg>
+      </span>
+    );
+  }
   if (name === "archive") {
     return (
       <span className="icon icon-archive" aria-hidden="true">
@@ -522,7 +556,7 @@ function AssetGrid({ assets, loading, error, onOpen, empty = "No media matches t
 function EmptyState({ icon, title, message, action }: { icon: string; title: string; message: string; action?: ReactNode }): ReactElement {
   return (
     <div className="empty-state">
-      <div className="empty-icon">{icon}</div>
+      <div className="empty-icon"><Icon name={icon} /></div>
       <h3>{title}</h3>
       <p>{message}</p>
       {action}
@@ -532,7 +566,7 @@ function EmptyState({ icon, title, message, action }: { icon: string; title: str
 function ErrorState({ message, retry }: { message: string; retry?: () => void }): ReactElement {
   return (
     <div className="error-state">
-      <div className="error-icon">!</div>
+      <div className="error-icon"><Icon name="alert" /></div>
       <div>
         <strong>Something went wrong</strong>
         <p>{message}</p>
@@ -601,14 +635,14 @@ function Shell({ route, children, onSearch }: { route: { page: PageKey; id?: str
             <span className="online-dot" /> <span>Local backend online</span>
           </div>
           <button className="collapse-button" onClick={() => setCollapsed((value) => !value)} aria-label="Toggle sidebar">
-            {collapsed ? "→" : "←"}
+            <Icon name={collapsed ? "arrow-right" : "arrow-left"} />
           </button>
         </div>
       </aside>
       <main className="main-area">
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setCollapsed((value) => !value)} aria-label="Toggle navigation">
-            ☰
+            <Icon name="menu" />
           </button>
           <button className="global-search" onClick={onSearch}>
             <Icon name="search" />
