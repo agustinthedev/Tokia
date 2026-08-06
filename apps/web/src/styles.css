@@ -269,6 +269,9 @@ h2 { color: #263348; font-size: 17px; }
 .modal-backdrop { background: rgba(35,52,78,.46); backdrop-filter: blur(12px); }.modal { border-color: #dfe6ee; background: #fbfdff; box-shadow: 0 30px 90px rgba(35,52,78,.2); }.step-number { color: var(--blue); background: #eaf1ff; }.selector-card { background: #f4f7fb; border-color: var(--border); }.selector-card.selected { border-color: #9eb9f4; background: #eff5ff; }.selected .selector-check { background: var(--blue); border-color: var(--blue); color: #fff; }
 .asset-detail-preview { background: #edf3f9; }.asset-detail-preview video { background: #eaf0f7; }.remote-note { color: var(--muted-2) !important; }
 
+body, button, input, select, textarea { font-family: 'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+h1, h2, h3, .brand { font-family: 'Space Grotesk', 'DM Sans', ui-sans-serif, system-ui, sans-serif; }
+
 @media (max-width: 860px) {
   .app-shell { width: 100%; height: 100vh; min-height: 100vh; margin: 0; border-radius: 0; border: 0; }
   .topbar { background: #fff; }
@@ -295,11 +298,17 @@ h2 { color: #263348; font-size: 17px; }
 .settings-tabs button.active { color: var(--blue); background: #fff; box-shadow: 0 4px 12px rgba(47,67,98,.08); }
 .settings-embedded-page > .section-header { margin-bottom: 20px; }
 
-/* Keep the header fixed while the page content owns the scroll position. */
-.main-area { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.topbar { flex: 0 0 auto; }
-.page-content { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #c2cfdf transparent; }
-.page-content::-webkit-scrollbar { width: 10px; }
-.page-content::-webkit-scrollbar-track { background: transparent; }
-.page-content::-webkit-scrollbar-thumb { background: #c2cfdf; border: 3px solid transparent; border-radius: 999px; background-clip: content-box; }
-.page-content::-webkit-scrollbar-thumb:hover { background: #8fa5c0; border-width: 2px; }
+/* Keep the header fixed while the main workspace owns the scroll position. */
+.main-area { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; position: relative; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #c2cfdf transparent; }
+.main-area::-webkit-scrollbar { width: 10px; }
+.main-area::-webkit-scrollbar-track { background: transparent; }
+.main-area::-webkit-scrollbar-thumb { background: #c2cfdf; border: 3px solid transparent; border-radius: 999px; background-clip: content-box; }
+.main-area::-webkit-scrollbar-thumb:hover { background: #8fa5c0; border-width: 2px; }
+.topbar { flex: 0 0 auto; position: sticky; top: 0; z-index: 10; }
+.page-content { flex: 0 0 auto; width: 100%; max-width: none; min-height: 0; margin: 0; overflow: visible; padding-left: 42px; padding-right: 42px; }
+
+/* A regular grid keeps already-visible media in place when another page is appended. */
+.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; align-items: start; }
+.asset-card { margin-bottom: 0; }
+@media (max-width: 1200px) { .asset-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); } }
+@media (max-width: 580px) { .asset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } }
