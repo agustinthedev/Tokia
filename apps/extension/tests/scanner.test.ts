@@ -39,6 +39,11 @@ describe('extension Pinterest scanner', () => {
     expect(extractVisiblePins(page.window.document)[0]).toMatchObject({ mediaType: 'video', mediaUrl: 'https://v.pinimg.com/videos/video456.mp4' });
   });
 
+  it('keeps a video marker when Pinterest defers the playable URL until the pin opens', () => {
+    const page = dom(`<html><body><h1>Video board</h1><article><a href="/pin/video789/"><img src="https://i.pinimg.com/236x/aa/bb/cc/video789.jpg"></a><div data-test-id="pinrep-video"></div></article></body></html>`);
+    expect(extractVisiblePins(page.window.document)[0]).toMatchObject({ mediaType: 'video', imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/video789.jpg' });
+  });
+
   it('deduplicates pins by strong identity while preserving distinct Pin IDs with one image path', () => {
     const pins = [
       { externalId: '1', pinUrl: 'https://www.pinterest.com/pin/1/', imageUrl: 'https://i.pinimg.com/236x/aa/bb/cc/same.jpg' },

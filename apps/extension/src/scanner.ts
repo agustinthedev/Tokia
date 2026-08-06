@@ -103,6 +103,7 @@ function getCard(anchor: HTMLAnchorElement): Element {
 interface DetectedMedia {
   image: HTMLImageElement | null;
   video: HTMLVideoElement | null;
+  hasVideoMarker: boolean;
   posterUrl: string | null;
   mediaUrl: string | null;
   mimeType: string | null;
@@ -127,6 +128,8 @@ function getMediaAttribute(element: Element): string | null {
 function getDetectedMedia(anchor: HTMLAnchorElement, card: Element, document: Document): DetectedMedia {
   const image = getPinImage(anchor, document) ?? card.querySelector<HTMLImageElement>('img');
   const video = card.querySelector<HTMLVideoElement>('video');
+  const hasVideoMarker = Boolean(card.querySelector('[data-test-id*="video"], [data-pin-type="video"], [data-type="video"]')) ||
+    Array.from(card.querySelectorAll<HTMLElement>('[aria-label]')).some((node) => /video/i.test(node.getAttribute('aria-label') ?? ''));
   const mediaNodes = [
     ...(video ? [video] : []),
     ...Array.from(card.querySelectorAll<HTMLSourceElement>('video source')),
@@ -155,7 +158,7 @@ function getDetectedMedia(anchor: HTMLAnchorElement, card: Element, document: Do
   const durationSeconds = video && Number.isFinite(video.duration) && video.duration >= 0
     ? video.duration
     : Number.isFinite(parsedDuration) && parsedDuration >= 0 ? parsedDuration : null;
-  return { image, video, posterUrl, mediaUrl, mimeType, durationSeconds };
+  return { image, video, hasVideoMarker, posterUrl, mediaUrl, mimeType, durationSeconds };
 }
 
 function getTextFromCard(card: Element, selectors: string[]): string | null {
@@ -217,7 +220,7 @@ export function extractVisiblePins(document: Document): IngestionPin[] {
       pinUrl: canonicalUrl ?? pinUrl,
       imageUrl: imageUrl ?? undefined,
       mediaUrl: media.mediaUrl ?? undefined,
-      mediaType: media.mediaUrl || media.video ? 'video' : 'image',
+      mediaType: media.mediaUrl || media.video || media.hasVideoMarker ? 'video' : 'image',
       mimeType: media.mimeType,
       durationSeconds: media.durationSeconds,
       previewUrl: variants.at(-1)?.url ?? currentImage,
