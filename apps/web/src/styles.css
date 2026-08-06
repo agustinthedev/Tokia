@@ -283,3 +283,10 @@ h2 { color: #263348; font-size: 17px; }
   .stat-value { font-size: 25px; }
   .panel { padding: 17px; }
 }
+
+/* Media is loaded incrementally; omit board-grid dimensions until true source metadata is available. */
+.asset-card-meta > span:nth-of-type(2),
+.metadata-list > div:first-child { display: none; }
+.asset-load-more { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 54px; margin: 4px 0 18px; color: var(--muted); font-size: 11px; text-align: center; }
+.asset-load-more .spinner { width: 18px; height: 18px; margin: 0; }
+.asset-load-more .inline-error { margin: 0; }
