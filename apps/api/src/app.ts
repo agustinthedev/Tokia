@@ -518,7 +518,7 @@ export async function buildApp(
   await app.register(cors, {
     origin: (origin, callback) =>
       callback(null, !origin || settings.corsAllowedOrigins.includes(origin)),
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "X-Local-Integration-Token",
