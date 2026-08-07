@@ -343,7 +343,14 @@ function assetWhere(query: QueryRecord): {
 } {
   const clauses = ["a.provider = ?"];
   const params: unknown[] = [query.provider?.trim() || "pinterest"];
-  if (query.collectionId) {
+  const collectionIds = query.collectionIds
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (collectionIds?.length) {
+    clauses.push(`ca.collection_id IN (${collectionIds.map(() => "?").join(",")})`);
+    params.push(...collectionIds);
+  } else if (query.collectionId) {
     clauses.push("ca.collection_id = ?");
     params.push(query.collectionId);
   }
@@ -2311,7 +2318,7 @@ export async function buildApp(
           durationCustomized: false,
         };
         db.prepare(
-          "UPDATE content_frames SET source_media_id = ?, settings_json = ?, updated_at = ? WHERE id = ?",
+          "UPDATE content_frames SET source_media_id = ?, image_locked = 1, settings_json = ?, updated_at = ? WHERE id = ?",
         ).run(mediaId, JSON.stringify(settings), now(), frameId);
         db.prepare(
           "DELETE FROM content_assets WHERE frame_id = ? AND variant = 'source_normalized'",

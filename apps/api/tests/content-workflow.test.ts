@@ -127,11 +127,17 @@ describe('project and content workflow', () => {
     const createdProject = await app.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: 'Video sources', niche: 'Travel', collectionIds: [collectionId] } });
     const projectId = createdProject.json().id as string;
     const videoAsset = (await app.inject({ method: 'GET', url: `/api/collections/${collectionId}/assets?mediaType=video` })).json().items[0];
+    const scopedAssets = await app.inject({ method: 'GET', url: `/api/assets?mediaType=source&collectionIds=${collectionId}&search=${videoAsset.externalId}` });
+    expect(scopedAssets.statusCode).toBe(200);
+    expect(scopedAssets.json().items.map((asset: { id: string }) => asset.id)).toContain(videoAsset.id);
     const draft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'single_image', configuration: { sourceCollectionIds: [collectionId] } } });
     const selected = await app.inject({ method: 'POST', url: `/api/content/${draft.json().id}/images/select`, headers, payload: { mediaIds: [videoAsset.id] } });
     expect(selected.statusCode).toBe(200);
     expect(selected.json().frames[0].sourceMedia).toMatchObject({ mediaType: 'video', width: 736, height: 1104 });
     expect(selected.json().frames[0].role).toBe('title_and_summary');
+    const manuallyLocked = await app.inject({ method: 'PUT', url: `/api/content/${draft.json().id}/frames/${selected.json().frames[0].id}/image`, headers, payload: { mediaId: videoAsset.id } });
+    expect(manuallyLocked.statusCode).toBe(200);
+    expect(manuallyLocked.json().frames[0].imageLocked).toBe(true);
 
     const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 1, includeCover: false, includeCta: false, textMode: 'none', video: { secondsPerImage: 1.5 } } } });
     const videoContentId = videoDraft.json().id as string;
