@@ -306,7 +306,7 @@ function assetDisplayTitle(asset: Asset): string {
     if (label && !isNoisyAssetLabel(label)) return label;
   }
   const pinId = asset.externalId ?? asset.canonicalUrl?.match(/\/pin\/(\d+)/i)?.[1];
-  return pinId ? `Pinterest pin ${pinId}` : "Untitled asset";
+  return pinId ?? "Untitled asset";
 }
 function normalizeAssetTitles<T>(value: T): T {
   if (Array.isArray(value)) return value.map((item) => normalizeAssetTitles(item)) as T;
@@ -2206,7 +2206,13 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const assets = useApi<{ items: Asset[]; pagination: Pagination }>("/api/assets?pageSize=100");
+  const [sourcePickerFrameId, setSourcePickerFrameId] = useState<string | null>(null);
+  const [sourceSearch, setSourceSearch] = useState("");
+  const sourcePickerPath =
+    sourcePickerFrameId && selectedCollections.length
+      ? `/api/assets?mediaType=source&pageSize=100&collectionIds=${encodeURIComponent(selectedCollections.join(","))}${sourceSearch.trim() ? `&search=${encodeURIComponent(sourceSearch.trim())}` : ""}`
+      : null;
+  const sourceAssets = useApi<{ items: Asset[]; pagination: Pagination }>(sourcePickerPath);
   const [dirty, setDirty] = useState(false);
   const updateConfig = (key: string, value: unknown) => {
     setDirty(true);
@@ -2378,6 +2384,32 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update lock");
+    }
+  };
+  const toggleSourcePicker = (frameId: string) => {
+    setSourcePickerFrameId((current) => (current === frameId ? null : frameId));
+    setSourceSearch("");
+  };
+  const chooseSourceForFrame = async (frame: ContentFrame, asset: Asset) => {
+    if (!content) return;
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await request<ContentDetail>(
+        `/api/content/${content.id}/frames/${frame.id}/image`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ mediaId: asset.id }),
+        },
+      );
+      setContent(updated);
+      setSourcePickerFrameId(null);
+      setSourceSearch("");
+      setDirty(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not select source content");
+    } finally {
+      setSaving(false);
     }
   };
   const editFrame = (frame: ContentFrame, field: "headline" | "body", value: string) => {
@@ -2755,7 +2787,8 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
           {error && <div className="inline-error">{error}</div>}
           <div className="frame-selection-list">
             {content?.frames.map((frame) => (
-              <div className="frame-selection-row" key={frame.id} draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", frame.id)}>
+              <div className="frame-selection-group" key={frame.id}>
+                <div className="frame-selection-row" draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", frame.id)}>
                 <span className="frame-number">{frame.position}</span>
                 <div className="frame-selection-preview">{(frame.sourceMedia?.imageUrl ?? frame.sourceMedia?.previewUrl) ? <img src={frame.sourceMedia.imageUrl ?? frame.sourceMedia.previewUrl} alt="" /> : <span>?</span>}</div>
                 <div>
@@ -2797,33 +2830,52 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                     </small>
                   </label>
                 )}
+                <Button onClick={() => toggleSourcePicker(frame.id)} disabled={!selectedCollections.length || saving}>
+                  {sourcePickerFrameId === frame.id ? "Close picker" : "Choose content"}
+                </Button>
                 <Button onClick={() => lockFrame(frame, "imageLocked")}>{frame.imageLocked ? "Unlock image" : "Lock image"}</Button>
+                </div>
+                {sourcePickerFrameId === frame.id && (
+                  <div className="frame-source-picker">
+                    <div className="frame-source-picker-heading">
+                      <div>
+                        <strong>Choose content for slot {frame.position}</strong>
+                        <span>Showing assets from the selected project collections.</span>
+                      </div>
+                      <button type="button" className="text-button" onClick={() => toggleSourcePicker(frame.id)}>
+                        Close
+                      </button>
+                    </div>
+                    <input
+                      value={sourceSearch}
+                      onChange={(event) => setSourceSearch(event.target.value)}
+                      placeholder="Search by Pin ID"
+                      aria-label={`Search content for slot ${frame.position} by Pin ID`}
+                    />
+                    {sourceAssets.loading && <div className="selection-loading">Loading collection content…</div>}
+                    {sourceAssets.error && <div className="inline-error">{sourceAssets.error}</div>}
+                    {!sourceAssets.loading && !sourceAssets.error && (
+                      <div className="frame-source-options">
+                        {(sourceAssets.data?.items ?? []).map((asset) => (
+                          <button type="button" className={`frame-source-option ${asset.id === frame.sourceMedia?.id ? "selected" : ""}`} key={asset.id} onClick={() => void chooseSourceForFrame(frame, asset)}>
+                            <span className="frame-source-option-thumb">
+                              {asset.thumbnailUrl ?? asset.previewUrl ?? asset.mediaUrl ? <img src={asset.thumbnailUrl ?? asset.previewUrl ?? asset.mediaUrl} alt="" /> : "?"}
+                            </span>
+                            <span>
+                              <strong>{asset.title ?? asset.externalId ?? "Untitled asset"}</strong>
+                              <small>{asset.externalId ?? "No Pin ID"}{asset.collectionName ? ` · ${asset.collectionName}` : ""}</small>
+                            </span>
+                          </button>
+                        ))}
+                        {!sourceAssets.data?.items.length && <div className="selection-loading">No content matches that Pin ID.</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
           <p className="wizard-help">Content is linked to the original collection records. Source previews stay visible so you can replace them before rendering.{type === "video_slideshow" ? " Set each scene duration here; images use the global default and videos start at their original length." : ""}</p>
-          {assets.data?.items.length ? (
-            <details>
-              <summary>Manual replacement sources</summary>
-              <div className="replacement-grid">
-                {assets.data.items.slice(0, 24).map((asset) => (
-                  <button
-                    type="button"
-                    key={asset.id}
-                    onClick={() =>
-                      content?.frames[0] &&
-                      request(`/api/content/${content.id}/frames/${content.frames[0].id}/image`, {
-                        method: "PUT",
-                        body: JSON.stringify({ mediaId: asset.id }),
-                      }).then(() => refreshContent())
-                    }
-                  >
-                    <img src={asset.thumbnailUrl ?? asset.mediaUrl} alt="" />
-                  </button>
-                ))}
-              </div>
-            </details>
-          ) : null}
         </div>
       )}
       {step === 5 && (
