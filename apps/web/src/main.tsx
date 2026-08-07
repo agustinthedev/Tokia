@@ -437,7 +437,7 @@ function StatusBadge({ value }: { value: string }): ReactElement {
 
 function MediaPreview({ asset, detail = false, onImageLoad }: { asset: Asset; detail?: boolean; onImageLoad?: (size: { width: number; height: number }) => void }): ReactElement {
   const [sourceIndex, setSourceIndex] = useState(0);
-  const imageSources = Array.from(new Set((asset.mediaType === "video" ? [asset.remotePreviewUrl, asset.thumbnailUrl, asset.remoteImageUrl] : [asset.remoteImageUrl, asset.mediaUrl, asset.remotePreviewUrl, asset.thumbnailUrl]).filter((value): value is string => Boolean(value))));
+  const imageSources = Array.from(new Set((asset.mediaType === "video" ? [asset.remotePreviewUrl, asset.previewUrl, asset.thumbnailUrl, asset.remoteImageUrl] : [asset.remoteImageUrl, asset.mediaUrl, asset.previewUrl, asset.remotePreviewUrl, asset.thumbnailUrl]).filter((value): value is string => Boolean(value))));
   const image = imageSources[sourceIndex];
   const videoSource = asset.mediaType === "video" && asset.mediaUrl ? asset.mediaUrl : undefined;
   const handleImageError = (): void => setSourceIndex((current) => current + 1);
@@ -2212,6 +2212,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const [notice, setNotice] = useState("");
   const [sourcePickerFrameId, setSourcePickerFrameId] = useState<string | null>(null);
   const [sourceSearch, setSourceSearch] = useState("");
+  const [sourcePreview, setSourcePreview] = useState<{ frame: ContentFrame; asset: Asset } | null>(null);
   const sourcePickerPath =
     sourcePickerFrameId && selectedCollections.length
       ? `/api/assets?mediaType=source&pageSize=100&collectionIds=${encodeURIComponent(selectedCollections.join(","))}${sourceSearch.trim() ? `&search=${encodeURIComponent(sourceSearch.trim())}` : ""}`
@@ -2393,6 +2394,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const toggleSourcePicker = (frameId: string) => {
     setSourcePickerFrameId((current) => (current === frameId ? null : frameId));
     setSourceSearch("");
+    setSourcePreview(null);
   };
   const chooseSourceForFrame = async (frame: ContentFrame, asset: Asset) => {
     if (!content) return;
@@ -2409,6 +2411,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       setContent(updated);
       setSourcePickerFrameId(null);
       setSourceSearch("");
+      setSourcePreview(null);
       setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not select source content");
@@ -2594,7 +2597,8 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const previewAsset = content?.assets.find((asset) => asset.variant === "preview" && asset.assetType === (content.type === "video_slideshow" ? "video" : "image"));
   const stepLabels = ["Type", "Sources", "Structure", "Content", "Visuals", "Text", "Preview"];
   return (
-    <Modal title={existingId ? "Continue content draft" : "Create content"} onClose={close} wide>
+    <>
+      <Modal title={existingId ? "Continue content draft" : "Create content"} onClose={close} wide>
       <div className="wizard-progress" aria-label="Content creation steps">
         {stepLabels.map((label, index) => (
           <button type="button" key={label} className={step === index + 1 ? "active" : step > index + 1 ? "complete" : ""} onClick={() => index + 1 < step && setStep(index + 1)}>
@@ -2877,15 +2881,21 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                     {!sourceAssets.loading && !sourceAssets.error && (
                       <div className="frame-source-options">
                         {(sourceAssets.data?.items ?? []).map((asset) => (
-                          <button type="button" className={`frame-source-option ${asset.id === frame.sourceMedia?.id ? "selected" : ""}`} key={asset.id} onClick={() => void chooseSourceForFrame(frame, asset)}>
-                            <span className="frame-source-option-thumb">
+                          <div className={`frame-source-option ${asset.id === frame.sourceMedia?.id ? "selected" : ""}`} key={asset.id}>
+                            <button
+                              type="button"
+                              className="frame-source-option-thumb"
+                              onClick={() => setSourcePreview({ frame, asset })}
+                              aria-label={`Preview ${asset.title ?? asset.externalId ?? "content"}`}
+                              title="Preview content"
+                            >
                               {asset.thumbnailUrl ?? asset.previewUrl ?? asset.mediaUrl ? <img src={asset.thumbnailUrl ?? asset.previewUrl ?? asset.mediaUrl} alt="" /> : "?"}
-                            </span>
-                            <span>
+                            </button>
+                            <button type="button" className="frame-source-option-details" onClick={() => void chooseSourceForFrame(frame, asset)}>
                               <strong>{asset.title ?? asset.externalId ?? "Untitled asset"}</strong>
                               <small>{asset.externalId ?? "No Pin ID"}{asset.collectionName ? ` · ${asset.collectionName}` : ""}</small>
-                            </span>
-                          </button>
+                            </button>
+                          </div>
                         ))}
                         {!sourceAssets.data?.items.length && <div className="selection-loading">No content matches that Pin ID.</div>}
                       </div>
@@ -3273,7 +3283,49 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
           Save draft
         </Button>
       </div>
-    </Modal>
+      </Modal>
+      {sourcePreview && (
+        <Modal title="Preview content" onClose={() => setSourcePreview(null)} wide>
+          <div className="source-preview-modal">
+            <div className="source-preview-media">
+              <MediaPreview asset={sourcePreview.asset} detail />
+            </div>
+            <div className="source-preview-copy">
+              <div className="eyebrow">Slot {sourcePreview.frame.position}</div>
+              <h3>{sourcePreview.asset.title ?? sourcePreview.asset.externalId ?? "Untitled asset"}</h3>
+              <p>Review this content at full size before assigning it to the slot.</p>
+              <div className="metadata-list">
+                <div>
+                  <span>Pin ID</span>
+                  <strong>{sourcePreview.asset.externalId ?? "Not available"}</strong>
+                </div>
+                <div>
+                  <span>Collection</span>
+                  <strong>{sourcePreview.asset.collectionName ?? "Selected project source"}</strong>
+                </div>
+                <div>
+                  <span>Dimensions</span>
+                  <strong>{sourcePreview.asset.width && sourcePreview.asset.height ? `${sourcePreview.asset.width} × ${sourcePreview.asset.height}` : "Unknown"}</strong>
+                </div>
+              </div>
+              <div className="source-preview-actions">
+                <Button onClick={() => setSourcePreview(null)}>Close preview</Button>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const selection = sourcePreview;
+                    setSourcePreview(null);
+                    void chooseSourceForFrame(selection.frame, selection.asset);
+                  }}
+                >
+                  Use this content
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 
