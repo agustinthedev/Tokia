@@ -361,6 +361,10 @@ function Icon({ name }: { name: string }): ReactElement {
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     image: <><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m7 16 3-3 2 2 2-3 3 4" /><circle cx="9" cy="9" r="1" /></>,
     video: <><rect x="4" y="6" width="13" height="12" rx="2" /><path d="m17 10 3-2v8l-3-2z" /></>,
+    "lock-open": <><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 7.6-1.8" /></>,
+    "lock-closed": <><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
+    "chevron-up": <path d="m6 15 6-6 6 6" />,
+    "chevron-down": <path d="m6 9 6 6 6-6" />,
     edit: <><path d="M4 17.5V20h2.5L19 7.5 16.5 5z" /><path d="m14.8 6.2 2.5 2.5" /></>,
     archive: <><path d="M5 7h14M9 7V5h6v2m-8 0 .8 12h6.4L15 7M10 10v6m4-6v6" /></>,
     menu: <><path d="M5 7h14M5 12h14M5 17h14" /></>,
@@ -2830,10 +2834,25 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                     </small>
                   </label>
                 )}
-                <Button onClick={() => toggleSourcePicker(frame.id)} disabled={!selectedCollections.length || saving}>
-                  {sourcePickerFrameId === frame.id ? "Close picker" : "Choose content"}
-                </Button>
-                <Button onClick={() => lockFrame(frame, "imageLocked")}>{frame.imageLocked ? "Unlock image" : "Lock image"}</Button>
+                <button
+                  type="button"
+                  className="frame-icon-button frame-picker-button"
+                  onClick={() => toggleSourcePicker(frame.id)}
+                  disabled={!selectedCollections.length || saving}
+                  title={sourcePickerFrameId === frame.id ? "Close content picker" : "Choose content"}
+                  aria-label={sourcePickerFrameId === frame.id ? "Close content picker" : "Choose content"}
+                >
+                  <Icon name={sourcePickerFrameId === frame.id ? "chevron-up" : "chevron-down"} />
+                </button>
+                <button
+                  type="button"
+                  className={`frame-icon-button frame-lock-button ${frame.imageLocked ? "is-locked" : "is-unlocked"}`}
+                  onClick={() => void lockFrame(frame, "imageLocked")}
+                  title={frame.imageLocked ? "Unlock image" : "Lock image"}
+                  aria-label={frame.imageLocked ? "Unlock image" : "Lock image"}
+                >
+                  <Icon name={frame.imageLocked ? "lock-closed" : "lock-open"} />
+                </button>
                 </div>
                 {sourcePickerFrameId === frame.id && (
                   <div className="frame-source-picker">
@@ -2847,6 +2866,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                       </button>
                     </div>
                     <input
+                      className="frame-source-search"
                       value={sourceSearch}
                       onChange={(event) => setSourceSearch(event.target.value)}
                       placeholder="Search by Pin ID"
