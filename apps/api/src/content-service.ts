@@ -78,7 +78,7 @@ export function createContentDraft(db: Database.Database, options: { projectId: 
   const configuration = mergeConfiguration(options.configuration, projectDefaults);
   const projectCollections = attachedCollectionIds(db, options.projectId);
   if (!configuration.sourceCollectionIds.length) configuration.sourceCollectionIds = projectCollections;
-  validateSourceCollections(db, options.projectId, configuration.sourceCollectionIds);
+  if (type !== 'video_clipping') validateSourceCollections(db, options.projectId, configuration.sourceCollectionIds);
   const roles = frameRoles(type, configuration);
   const contentId = id(); const timestamp = now(); const title = typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 200) : null;
   const language = typeof options.language === 'string' && options.language.trim() ? options.language.trim().slice(0, 80) : String(project.default_language ?? 'English');

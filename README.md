@@ -61,6 +61,9 @@ Variables disponibles:
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Orígenes exactos separados por comas. Agregar el origen de la extensión luego de cargarla. |
 | `LOG_LEVEL` | `info` | Nivel de logs estructurados. |
 | `CONTENT_STORAGE_DIRECTORY` | `./data/content` | Directorio para derivados de contenido, previews y archivos finales. |
+| `FFPROBE_PATH` | `ffprobe` | Ejecutable FFprobe usado para inspeccionar fuentes de clipping. |
+| `MAX_UPLOAD_BYTES` | `262144000` | Tamaño máximo de una fuente de video, 250 MiB. |
+| `APP_SECRETS_ENCRYPTION_KEY` | generado por proceso | Clave para cifrar credenciales de proveedores de IA; configurar de forma persistente en despliegues. |
 | `FFMPEG_PATH` | `ffmpeg` | Ejecutable FFmpeg usado para normalización, thumbnails y videos slideshow. |
 | `MODEL_PROVIDER` | `local` | Proveedor narrativo actual; `local` usa generación determinista sin red. |
 | `MODEL_NAME` | `structured-local-v1` | Identificador persistido junto a la configuración de generación. |
@@ -268,6 +271,10 @@ npm run build:extension
 ```
 
 La suite cubre normalización de URLs, IDs, claves de imágenes, primera importación, reimportación, rename con ID, import parcial, rollback, límite de payload, cross-collection, no colapso de Pins con la misma imagen, filtros de lectura, estados soft-disable y scanner DOM con `srcset`, deduplicación y cancelación.
+
+## AI-assisted video clipping
+
+The content wizard includes **Clipping** for uploading a long-form video, transcribing it, detecting topics and subtopics, selecting clips, configuring subtitles/branding/output format, and rendering/exporting the results. Provider setup, preflight, persistence, recovery, and known limitations are documented in `docs/video-clipping.md`.
 
 ## Alcance futuro
 

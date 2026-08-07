@@ -3,10 +3,18 @@ import { createRoot } from "react-dom/client";
 import { InfiniteAssetFooter, useInfiniteAssets } from "./asset-pagination";
 import { bindPreviewGallery } from "./preview-gallery";
 import "./styles.css";
+import { AiProvidersPage } from "./AiProvidersPage";
+import { ClippingWizard } from "./ClippingWizard";
+import "./clipping.css";
 
 type AnyRecord = Record<string, any>;
 type PageKey = "home" | "collections" | "assets" | "projects" | "imports" | "settings";
-type SettingsTab = "connection" | "preview" | "assets" | "imports";
+type SettingsTab =
+  | "connection"
+  | "preview"
+  | "assets"
+  | "imports"
+  | "ai-providers";
 type MediaKind = "image" | "video" | "animated";
 
 interface Pagination {
@@ -316,7 +324,9 @@ function settingsTabFromUrl(): SettingsTab {
   const tab = new URLSearchParams(window.location.search).get("tab");
   if (window.location.pathname === "/assets") return "assets";
   if (window.location.pathname === "/imports") return "imports";
-  return tab === "preview" || tab === "assets" || tab === "imports" ? tab : "connection";
+  return tab === "preview" || tab === "assets" || tab === "imports" || tab === "ai-providers"
+    ? tab
+    : "connection";
 }
 function getRoute(): { page: PageKey; id?: string } {
   const parts = window.location.pathname.split("/").filter(Boolean);
@@ -1266,7 +1276,7 @@ function ProjectDetailPage({ id, onEdit, onOpenAsset, onCreateContent, onOpenCon
             {contents.data.items.map((item) => (
               <div className="content-list-row" key={item.id}>
                 <button className="content-list-main" onClick={() => onOpenContent(item)}>
-                  <div className="content-list-thumb">{item.thumbnailUrl ? <img src={`${API_BASE}${item.thumbnailUrl}`} alt="" /> : <span>{item.type === "carousel" ? "▤" : item.type === "video_slideshow" ? "▶" : "▧"}</span>}</div>
+                  <div className="content-list-thumb">{item.thumbnailUrl ? <img src={`${API_BASE}${item.thumbnailUrl}`} alt="" /> : <span>{item.type === "carousel" ? "▤" : item.type === "video_slideshow" ? "▶" : item.type === "video_clipping" ? "✂" : "▧"}</span>}</div>
                   <div className="content-list-copy">
                     <strong>{item.title ?? item.topic ?? "Untitled draft"}</strong>
                     <span>
@@ -1619,12 +1629,13 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
   if (loading) return <PageLoading />;
   return (
     <>
-      <SectionHeader eyebrow="Workspace" title="Settings" description="Connection, media defaults, assets, and import history for Tokia." />
+      <SectionHeader eyebrow="Workspace" title="Settings" description="Connection, AI providers, media defaults, assets, and import history for Tokia." />
       <div className="settings-tabs" role="tablist" aria-label="Settings sections">
         {(
           [
             ["connection", "Connection", "settings"],
             ["preview", "Preview", "image"],
+            ["ai-providers", "AI Providers", "settings"],
             ["assets", "Assets", "assets"],
             ["imports", "Imports", "imports"],
           ] as const
@@ -1720,6 +1731,7 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
           </div>
         </section>
       )}
+      {tab === "ai-providers" && <AiProvidersPage />}
       {tab === "assets" && (
         <div className="settings-embedded-page">
           <AssetsPage onOpenAsset={onOpenAsset} />
@@ -1776,7 +1788,7 @@ function ProjectDialog({ project, onClose, onSaved }: { project?: Project; onClo
   const [search, setSearch] = useState("");
   const initialDefaults = project?.config ?? {
     aspectRatio: project?.config?.aspectRatio ?? "9:16",
-    preferredContentTypes: project?.config?.preferredContentTypes ?? ["single_image", "carousel", "video_slideshow"],
+    preferredContentTypes: project?.config?.preferredContentTypes ?? ["single_image", "carousel", "video_slideshow", "video_clipping"],
     textMode: project?.config?.textMode ?? "headline_and_body",
     tone: project?.config?.tone ?? "educational",
     includeCta: project?.config?.includeCta ?? true,
@@ -2001,7 +2013,7 @@ function ProjectDialog({ project, onClose, onSaved }: { project?: Project; onClo
             <div className="form-field">
               <span>Preferred content types</span>
               <div className="choice-grid">
-                {["single_image", "carousel", "video_slideshow"].map((type) => (
+                {["single_image", "carousel", "video_slideshow", "video_clipping"].map((type) => (
                   <label className="choice-card" key={type}>
                     <input
                       type="checkbox"
@@ -2013,8 +2025,8 @@ function ProjectDialog({ project, onClose, onSaved }: { project?: Project; onClo
                         }))
                       }
                     />
-                    <strong>{type === "single_image" ? "Single image" : type === "carousel" ? "Carousel" : "Video slideshow"}</strong>
-                    <small>{type === "carousel" ? "Independent swipeable slides" : type === "video_slideshow" ? "An MP4 with timed scenes" : "One finished image"}</small>
+                    <strong>{type === "single_image" ? "Single image" : type === "carousel" ? "Carousel" : type === "video_clipping" ? "Clipping" : "Video slideshow"}</strong>
+                    <small>{type === "carousel" ? "Independent swipeable slides" : type === "video_slideshow" ? "An MP4 with timed scenes" : type === "video_clipping" ? "Short clips from a long-form video" : "One finished image"}</small>
                   </label>
                 ))}
               </div>
@@ -2137,9 +2149,15 @@ function ProjectDialog({ project, onClose, onSaved }: { project?: Project; onClo
 }
 
 function typeLabel(type: string): string {
-  return type === "single_image" ? "Single image" : type === "video_slideshow" ? "Video slideshow" : "Carousel";
+  return type === "single_image"
+    ? "Single image"
+    : type === "video_slideshow"
+      ? "Video slideshow"
+      : type === "video_clipping"
+        ? "Clipping"
+        : "Carousel";
 }
-function ContentWizard({ project, existingId, onClose, onSaved }: { project: Project; existingId?: string; onClose: () => void; onSaved: () => void }): ReactElement {
+function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectClipping }: { project: Project; existingId?: string; onClose: () => void; onSaved: () => void; onSelectClipping: () => void }): ReactElement {
   const defaultSettings = project.config ?? {};
   const [step, setStep] = useState(existingId ? 4 : 1);
   const [type, setType] = useState(String((defaultSettings.preferredContentTypes as string[] | undefined)?.[0] ?? "carousel"));
@@ -2563,12 +2581,17 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
               ["single_image", "Single image", "One finished image with optional text."],
               ["carousel", "Carousel", "Independent images intended to be swiped manually."],
               ["video_slideshow", "Video slideshow", "One MP4 composed from timed image scenes."],
+              ["video_clipping", "Clipping", "Turn a long-form video into multiple short-form clips."],
             ].map(([value, label, description]) => (
               <button
                 type="button"
                 key={value}
                 className={`content-type-card ${type === value ? "selected" : ""}`}
                 onClick={() => {
+                  if (value === "video_clipping") {
+                    onSelectClipping();
+                    return;
+                  }
                   setDirty(true);
                   setType(value);
                   if (value === "single_image")
@@ -3179,6 +3202,44 @@ function ContentWizard({ project, existingId, onClose, onSaved }: { project: Pro
         </Button>
       </div>
     </Modal>
+  );
+}
+
+function ContentWizard({
+  project,
+  existingId,
+  onClose,
+  onSaved,
+}: {
+  project: Project;
+  existingId?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}): ReactElement {
+  const existing = useApi<ContentDetail>(
+    existingId ? `/api/content/${existingId}` : null,
+  );
+  const [clipping, setClipping] = useState(false);
+  useEffect(() => {
+    if (existing.data?.type === "video_clipping") setClipping(true);
+  }, [existing.data?.type]);
+  if (clipping)
+    return (
+      <ClippingWizard
+        project={project}
+        existingId={existingId}
+        onClose={onClose}
+        onSaved={onSaved}
+      />
+    );
+  return (
+    <LegacyContentWizard
+      project={project}
+      existingId={existingId}
+      onClose={onClose}
+      onSaved={onSaved}
+      onSelectClipping={() => setClipping(true)}
+    />
   );
 }
 

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const CONTENT_TYPES = ['single_image', 'carousel', 'video_slideshow'] as const;
+export const CONTENT_TYPES = ['single_image', 'carousel', 'video_slideshow', 'video_clipping'] as const;
 export type ContentType = typeof CONTENT_TYPES[number];
 export const CONTENT_STATUSES = ['draft', 'preview_generating', 'preview_ready', 'generation_queued', 'generating', 'ready', 'failed', 'archived'] as const;
 export type ContentStatus = typeof CONTENT_STATUSES[number];
@@ -112,6 +112,7 @@ export function mergeConfiguration(input: unknown, projectDefaults?: unknown): C
 }
 
 export function frameRoles(type: ContentType, configuration: ContentConfiguration): FrameDefinition[] {
+  if (type === 'video_clipping') return [];
   if (type === 'single_image') return [{ position: 1, role: 'title_and_summary' }];
   const total = configuration.totalFrames;
   const required = Number(configuration.includeCover) + Number(configuration.includeCta);
@@ -174,7 +175,7 @@ export function normalizeFrameDuration(value: unknown, configuration: ContentCon
 }
 
 export function assertContentType(value: unknown): ContentType {
-  if (typeof value !== 'string' || !CONTENT_TYPES.includes(value as ContentType)) throw new ContentValidationError('INVALID_CONTENT_TYPE', 'Content type must be single_image, carousel, or video_slideshow.');
+  if (typeof value !== 'string' || !CONTENT_TYPES.includes(value as ContentType)) throw new ContentValidationError('INVALID_CONTENT_TYPE', 'Content type must be single_image, carousel, video_slideshow, or video_clipping.');
   return value as ContentType;
 }
 
@@ -185,4 +186,3 @@ export function ratioDimensions(aspectRatio: ContentConfiguration['aspectRatio']
   if (aspectRatio === '16:9') return { width: base, height: Math.round(base * 9 / 16) };
   return { width: Math.round(base * 9 / 16), height: base };
 }
-
