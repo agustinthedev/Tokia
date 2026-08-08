@@ -14,6 +14,7 @@ export type ProviderErrorCode =
   | "QUOTA_OR_BILLING_ERROR"
   | "RATE_LIMITED"
   | "TIMEOUT"
+  | "INVALID_REQUEST"
   | "NETWORK_ERROR"
   | "PROVIDER_UNAVAILABLE"
   | "INVALID_BASE_URL"
@@ -384,6 +385,17 @@ export function normalizeProviderError(
 ): ProviderError {
   const errorCode = (error as ProviderError | undefined)?.code;
   if (typeof errorCode === "string") return error as ProviderError;
+  const providerMessage =
+    typeof (error as any)?.error?.message === "string"
+      ? String((error as any).error.message).replace(/\s+/g, " ").slice(0, 300)
+      : undefined;
+  if (responseStatus === 400)
+    return providerError(
+      "INVALID_REQUEST",
+      providerMessage
+        ? `The provider rejected the request: ${providerMessage}`
+        : "The provider rejected the request.",
+    );
   if (responseStatus === 401 || responseStatus === 403)
     return providerError(
       responseStatus === 401
@@ -454,7 +466,15 @@ async function providerFetch(
       `${String(row.base_url).replace(/\/$/, "")}${endpoint}`,
       { ...init, headers, signal: controller.signal },
     );
-    if (!response.ok) throw normalizeProviderError(undefined, response.status);
+    if (!response.ok) {
+      let body: unknown;
+      try {
+        body = await response.clone().json();
+      } catch {
+        body = undefined;
+      }
+      throw normalizeProviderError(body, response.status);
+    }
     return response;
   } catch (error) {
     throw normalizeProviderError(error);

@@ -62,4 +62,17 @@ describe("AI provider security and capability model", () => {
       message: "The provider request timed out. Try again in a moment.",
     });
   });
+
+  it("keeps a safe provider rejection detail for invalid requests", () => {
+    expect(
+      normalizeProviderError(
+        { error: { message: "The selected transcription model is unavailable." } },
+        400,
+      ),
+    ).toMatchObject({
+      code: "INVALID_REQUEST",
+      message:
+        "The provider rejected the request: The selected transcription model is unavailable.",
+    });
+  });
 });

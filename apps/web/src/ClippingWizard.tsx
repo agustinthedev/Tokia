@@ -69,6 +69,19 @@ function ms(value: number | undefined): string {
 function statusLabel(value?: string): string {
   return String(value ?? "not started").replaceAll("_", " ");
 }
+function processingStageLabel(value?: string): string {
+  const labels: Record<string, string> = {
+    uploaded: "Ready to process",
+    audio_extraction: "Extracting audio",
+    audio_extracted: "Ready to transcribe",
+    transcribing: "Transcribing",
+    detecting_topics: "Analyzing topics",
+    detecting_subtopics: "Finding clip candidates",
+    ready: "Ready",
+    failed: "Processing failed",
+  };
+  return labels[String(value ?? "")] ?? statusLabel(value);
+}
 
 export function ClippingWizard({
   project,
@@ -470,6 +483,10 @@ export function ClippingWizard({
                   : "MP4, MOV, WebM, or another FFmpeg-readable format"}
               </small>
             </label>
+            <p className="wizard-help">
+              Choosing a file only selects it locally. The upload starts when
+              you click “Upload and continue”.
+            </p>
             {state?.source && (
               <div className="inline-note">
                 {state.source.originalFilename} · {ms(state.source.durationMs)}{" "}
@@ -504,7 +521,7 @@ export function ClippingWizard({
             </div>
             <div className="processing-card">
               <div>
-                <strong>{statusLabel(state?.source?.processingStage)}</strong>
+                <strong>{processingStageLabel(state?.source?.processingStage)}</strong>
                 <span>{state?.source?.processingProgress ?? 0}% complete</span>
               </div>
               <div className="progress-track">
@@ -523,11 +540,18 @@ export function ClippingWizard({
             </div>
             {state?.source?.status === "uploaded" && (
               <div className="inline-note">
-                Nothing is sent to a provider until you start processing.
+                Video uploaded and inspected. Click “Start processing” to
+                extract audio, transcribe it, and find topics.
               </div>
             )}
             {state?.source?.errorMessage && (
-              <div className="inline-error">{state.source.errorMessage}</div>
+              <div className="inline-error">
+                <strong>Processing failed.</strong>
+                <p>{state.source.errorMessage}</p>
+                {state.source.errorCode && (
+                  <small>Error code: {state.source.errorCode}</small>
+                )}
+              </div>
             )}
             <div className="modal-footer">
               <Button onClick={() => void persistStep(2)}>Back</Button>
@@ -541,7 +565,11 @@ export function ClippingWizard({
                   disabled={busy || processing || !state?.source}
                   onClick={() => void analyze()}
                 >
-                  {processing ? "Processing…" : "Start processing"}
+                  {processing
+                    ? "Processing…"
+                    : state?.source?.status === "failed"
+                      ? "Retry processing"
+                      : "Start processing"}
                 </Button>
               )}
             </div>
