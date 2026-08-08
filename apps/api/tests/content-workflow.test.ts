@@ -42,7 +42,11 @@ describe('project and content workflow', () => {
     const draftResponse = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'carousel', configuration: { sourceCollectionIds: [collectionId], totalFrames: 5, includeCover: true, includeCta: true, textMode: 'headline_and_body', topic: 'A simple mobility routine' } } });
     expect(draftResponse.statusCode).toBe(201);
     const contentId = draftResponse.json().id as string;
+    expect(draftResponse.json().wizardStep).toBe(1);
     expect(draftResponse.json().frames.map((frame: { role: string }) => frame.role)).toEqual(['cover', 'content', 'content', 'content', 'cta']);
+    const stepUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${contentId}/wizard-step`, headers, payload: { step: 5 } });
+    expect(stepUpdate.statusCode).toBe(200);
+    expect(stepUpdate.json().wizardStep).toBe(5);
     const titleUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${contentId}`, headers, payload: { title: 'Mobility routine' } });
     expect(titleUpdate.statusCode).toBe(200);
     expect(titleUpdate.json().title).toBe('Mobility routine');

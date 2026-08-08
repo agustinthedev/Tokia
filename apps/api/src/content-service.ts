@@ -65,9 +65,25 @@ export function contentSnapshot(db: Database.Database, contentId: string): Row |
   }));
   const jobs = (db.prepare('SELECT id, job_type, status, progress, attempt, error_code, error_message, started_at, finished_at, created_at FROM generation_jobs WHERE content_id = ? ORDER BY created_at DESC LIMIT 20').all(contentId) as Row[]).map((job) => ({ id: job.id, jobType: job.job_type, status: job.status, progress: job.progress, attempt: job.attempt, errorCode: job.error_code, errorMessage: job.error_message, startedAt: job.started_at, finishedAt: job.finished_at, createdAt: job.created_at }));
   return { id: row.id, projectId: row.project_id, projectName: row.project_name, type: row.type, title: row.title, status: row.status, language: row.language, topic: row.topic,
-    configuration, narrative: parseJson<Narrative | null>(row.narrative_json, null), previewVersion: row.preview_version, acceptedVersion: row.accepted_version, version: row.version,
+    configuration, narrative: parseJson<Narrative | null>(row.narrative_json, null), wizardStep: row.wizard_step, previewVersion: row.preview_version, acceptedVersion: row.accepted_version, version: row.version,
     errorCode: row.error_code, errorMessage: row.error_message, createdAt: row.created_at, updatedAt: row.updated_at, archivedAt: row.archived_at, frameCount: frames.length,
     contentFrameCount: frames.filter((frame) => frame.role === 'content').length, frames, assets, jobs };
+}
+
+export function updateContentWizardStep(
+  db: Database.Database,
+  contentId: string,
+  step: unknown,
+): Row {
+  const row = contentRow(db, contentId);
+  if (!row || row.status === 'archived')
+    throw new ContentValidationError('CONTENT_NOT_FOUND', 'Content item not found.');
+  const parsed = Number(step);
+  const next = Number.isFinite(parsed)
+    ? Math.max(1, Math.min(7, Math.round(parsed)))
+    : 1;
+  db.prepare('UPDATE content_items SET wizard_step = ?, updated_at = ? WHERE id = ?').run(next, now(), contentId);
+  return contentSnapshot(db, contentId)!;
 }
 
 export function createContentDraft(db: Database.Database, options: { projectId: string; type: unknown; title?: unknown; language?: unknown; configuration?: unknown }): Row {

@@ -30,6 +30,7 @@ import {
   enqueueJob,
   startContentWorker,
   updateContent,
+  updateContentWizardStep,
   validateSourceCollections,
 } from "./content-service.js";
 import { contentDirectory } from "./content-media.js";
@@ -1883,6 +1884,16 @@ export async function buildApp(
       const { id } = request.params as { id: string };
       const updated = updateContent(db, id, bodyOf(request));
       return updated;
+    },
+  );
+
+  app.patch(
+    "/api/content/:id/wizard-step",
+    { schema: { tags: ["content"], summary: "Save content wizard progress" } },
+    async (request, reply) => {
+      if (!integrationGuard(settings, request, reply)) return;
+      const { id } = request.params as { id: string };
+      return updateContentWizardStep(db, id, bodyOf(request).step);
     },
   );
 
