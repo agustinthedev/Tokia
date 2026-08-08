@@ -122,13 +122,21 @@ export function ClippingWizard({
         ),
       );
     if (existingId)
-      void refresh(existingId).catch((caught) =>
-        setError(
-          caught instanceof Error
-            ? caught.message
-            : "Could not load clipping draft",
-        ),
-      );
+      void refresh(existingId)
+        .then((value) => {
+          const persistedStep = Number(value?.source?.wizardStep);
+          if (Number.isInteger(persistedStep) && persistedStep >= 1 && persistedStep <= 7)
+            setStep(persistedStep);
+          if (value?.source?.title) setTitle(String(value.source.title));
+          if (value?.source?.notes) setNotes(String(value.source.notes));
+        })
+        .catch((caught) =>
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Could not load clipping draft",
+          ),
+        );
   }, [existingId]);
   useEffect(() => {
     if (!contentId) return;
