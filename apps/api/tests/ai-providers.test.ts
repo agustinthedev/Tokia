@@ -77,6 +77,14 @@ describe("AI provider security and capability model", () => {
     });
   });
 
+  it("explains when a transcription file exceeds the provider limit", () => {
+    expect(normalizeProviderError({}, 413)).toMatchObject({
+      code: "INVALID_REQUEST",
+      message:
+        "The audio file is too large for the provider. Use a shorter video or a compressed audio format.",
+    });
+  });
+
   it("uses the timestamp-compatible OpenAI transcription model for clipping", () => {
     expect(
       transcriptionModelForClipping({

@@ -87,6 +87,7 @@ const LOCAL_DEFAULT_CAPABILITIES: ProviderCapabilities = {
 };
 
 type Row = Record<string, any>;
+const OPENAI_TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;
 function now(): string {
   return new Date().toISOString();
 }
@@ -420,6 +421,11 @@ export function normalizeProviderError(
       "RATE_LIMITED",
       "The provider rate limit was reached.",
     );
+  if (responseStatus === 413)
+    return providerError(
+      "INVALID_REQUEST",
+      "The audio file is too large for the provider. Use a shorter video or a compressed audio format.",
+    );
   if (responseStatus && responseStatus >= 500)
     return providerError(
       "PROVIDER_UNAVAILABLE",
@@ -584,6 +590,14 @@ export async function transcribe(
     throw providerError(
       "LOCAL_RUNTIME_UNAVAILABLE",
       "Local Whisper is configured but no executable transcription runtime is available in this deployment.",
+    );
+  if (
+    row.provider_type === "openai" &&
+    (await fs.stat(audioPath)).size > OPENAI_TRANSCRIPTION_MAX_BYTES
+  )
+    throw providerError(
+      "INVALID_REQUEST",
+      "The audio file is too large for the provider. Use a shorter video or a compressed audio format.",
     );
   const audio = await fs.readFile(audioPath);
   const form = new FormData();

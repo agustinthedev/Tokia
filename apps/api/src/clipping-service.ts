@@ -42,6 +42,7 @@ type ClipJobType =
   | "topic_detection"
   | "subtopic_detection"
   | "render_batch";
+const CLIPPING_AUDIO_FILENAME = "audio-16k.mp3";
 function id(): string {
   return crypto.randomUUID();
 }
@@ -837,8 +838,9 @@ async function runJob(
       )
       .run(stage, progress, now(), source.id);
   if (job.job_type === "audio_extraction") {
-    const audioPath = path.join(directory, "audio-16k.wav");
+    const audioPath = path.join(directory, CLIPPING_AUDIO_FILENAME);
     await extractAudio(settings.ffmpegPath, source.source_path, audioPath);
+    await fsp.rm(path.join(directory, "audio-16k.wav"), { force: true });
     const meta = await fileMetadata(audioPath);
     db.prepare(
       "UPDATE long_video_sources SET audio_hash = ?, processing_stage = 'audio_extracted', processing_progress = 20, updated_at = ? WHERE id = ?",
@@ -849,7 +851,7 @@ async function runJob(
   if (job.job_type === "transcription") {
     update("transcribing", 35);
     const provider = providerForTask(db, "TRANSCRIPTION");
-    const audioPath = path.join(directory, "audio-16k.wav");
+    const audioPath = path.join(directory, CLIPPING_AUDIO_FILENAME);
     const started = Date.now();
     try {
       const result = await transcribe(
@@ -872,7 +874,7 @@ async function runJob(
     } catch (error) {
       const safe = normalizeProviderError(error);
       touchRequest(db, provider.id, "TRANSCRIPTION", "failed", {
-        modelName: provider.transcription_model,
+        modelName: transcriptionModelForClipping(provider),
         errorCode: safe.code,
         latencyMs: Date.now() - started,
       });

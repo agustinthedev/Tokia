@@ -133,7 +133,9 @@ export async function extractAudio(
     "-ar",
     "16000",
     "-c:a",
-    "pcm_s16le",
+    "libmp3lame",
+    "-b:a",
+    "64k",
     outputPath,
   ]);
 }
