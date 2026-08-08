@@ -1694,10 +1694,12 @@ function BrowserExtensionSettings({
   useEffect(() => setExtensionId(initialId ?? ""), [initialId]);
   useEffect(() => {
     let active = true;
+    let hasDetectedExtension = false;
     const handleMessage = (event: MessageEvent): void => {
-      const detected = extensionIdFromMessage(event);
-      if (detected && active) {
-        setDetectedExtensionId(detected);
+      const detectedId = extensionIdFromMessage(event);
+      if (detectedId && active) {
+        hasDetectedExtension = true;
+        setDetectedExtensionId(detectedId);
         setDetectionState("detected");
       }
     };
@@ -1709,7 +1711,7 @@ function BrowserExtensionSettings({
       window.location.origin,
     );
     const timeout = window.setTimeout(() => {
-      if (active) setDetectionState("missing");
+      if (active && !hasDetectedExtension) setDetectionState("missing");
     }, 1800);
     return () => {
       active = false;
