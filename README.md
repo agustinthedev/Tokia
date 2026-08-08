@@ -45,13 +45,13 @@ Desde la raíz del repositorio:
 npm install
 ```
 
-No es necesario crear un `.env` para una instalaciÃ³n local. Tokia genera y persiste automÃ¡ticamente sus secretos de runtime, y la configuraciÃ³n de proveedores, integraciÃ³n local y extensiÃ³n se realiza desde la interfaz.
+No es necesario crear un `.env` para una instalaciÃ³n local. Tokia genera y persiste automÃ¡ticamente sus secretos de runtime, y la configuraciÃ³n de proveedores, integraciÃ³n local, extensiÃ³n y opciones avanzadas se realiza desde la interfaz.
 
-El `.env` queda disponible Ãºnicamente como compatibilidad para sobrescribir valores avanzados en entornos de desarrollo.
+Los valores avanzados tienen defaults seguros y se guardan en `data/tokia-settings.json`. Los cambios de servidor, almacenamiento y proceso pueden requerir reiniciar el API.
 
-Variables disponibles:
+Opciones avanzadas disponibles desde `Settings > Advanced`:
 
-| Variable | Default | Uso |
+| Opción | Default | Uso |
 | --- | --- | --- |
 | `HOST` | `127.0.0.1` | Interfaz local del API. |
 | `PORT` | `3000` | Puerto del API. |
@@ -219,7 +219,7 @@ El resultado queda en `apps/extension/dist`.
 4. Seleccionar `apps/extension/dist`.
 5. En Tokia, abrir `Settings > Connection > Extension connection` y pulsar `Connect extension`.
 6. Si la extensión ya estaba cargada antes de esta versión, pulsar `Reload` en `chrome://extensions` y volver a abrir Tokia.
-7. El origen CORS queda persistido en SQLite y no hace falta editar `.env` ni reiniciar el API. También queda disponible una opción manual avanzada.
+7. El origen CORS queda persistido en SQLite y no hace falta editar archivos de configuración. También queda disponible una opción manual avanzada en Settings.
 
 ### Cargar en Brave
 
@@ -323,6 +323,6 @@ La tabla de unión mantiene los proyectos desacoplados del origen Pinterest. Las
 
 El flujo actual de proyectos permite crear y editar proyectos con nombre, nicho, idioma, notas, preferencias visuales y colecciones de origen. Dentro de cada proyecto se puede crear un borrador de imagen única, carrusel o video slideshow, seleccionar fuentes únicas, reordenar y bloquear imágenes, generar narrativa estructurada, editar y bloquear copy, producir un preview local y confirmar la generación final.
 
-Los estados, jobs, frames, assets derivados y errores quedan persistidos en SQLite. FFmpeg escribe en `CONTENT_STORAGE_DIRECTORY`; los originales de Pinterest no se modifican. Los carruseles y videos tienen endpoints de descarga, y el paquete ZIP incluye los slides finales, metadata y caption.
+Los estados, jobs, frames, assets derivados y errores quedan persistidos en SQLite. FFmpeg escribe en el directorio de contenido configurado en `Settings > Advanced`; los originales de Pinterest no se modifican. Los carruseles y videos tienen endpoints de descarga, y el paquete ZIP incluye los slides finales, metadata y caption.
 
 La migración correspondiente es `apps/api/migrations/003_content_workflow.sql`. El detalle del flujo, los límites actuales y los comandos de verificación están en `docs/phase3-content-workflow.md`.

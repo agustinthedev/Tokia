@@ -22,13 +22,13 @@ A carousel is a group of independent images intended for manual swiping. It does
 
 Migration `apps/api/migrations/003_content_workflow.sql` adds `content_items`, `content_frames`, `content_assets`, and `generation_jobs`, plus project metadata columns. Jobs are persisted in SQLite, claimed by a single-host worker, and reset from `running` to `queued` during startup recovery. A failed job stores a stable error code, human-readable message, attempt count, and retryable status.
 
-The local structured narrative provider is deterministic by default (`MODEL_PROVIDER=local`). Its response is validated for exact frame count, ordered roles, required fields, text mode, and character limits before it reaches SQLite or the renderer. The stored configuration, provider, model name, narrative, and version fields are intentionally future-ready for templates without adding template behavior in this phase.
+The local structured narrative provider is deterministic by default (`modelProvider=local` in Settings → Advanced). Its response is validated for exact frame count, ordered roles, required fields, text mode, and character limits before it reaches SQLite or the renderer. The stored configuration, provider, model name, narrative, and version fields are intentionally future-ready for templates without adding template behavior in this phase.
 
 ## Media and output storage
 
-The API downloads selected source media, normalizes it with FFmpeg, and stores derived files under `CONTENT_STORAGE_DIRECTORY/content-{id}`. Original ingested assets are not mutated. PNG frames, WebP thumbnails, MP4 videos, SHA-256 hashes, dimensions, and metadata are persisted in `content_assets`. Carousel ZIP downloads include final slides, `metadata.json`, and `caption.txt`. The API exposes download URLs rather than filesystem paths.
+The API downloads selected source media, normalizes it with FFmpeg, and stores derived files under the configured content storage directory (`content-{id}`). Original ingested assets are not mutated. PNG frames, WebP thumbnails, MP4 videos, SHA-256 hashes, dimensions, and metadata are persisted in `content_assets`. Carousel ZIP downloads include final slides, `metadata.json`, and `caption.txt`. The API exposes download URLs rather than filesystem paths.
 
-Set `FFMPEG_PATH` when FFmpeg is not available on `PATH`. Node.js 20+ and the existing SQLite dependency are required. No Docker is used.
+Change the FFmpeg executable path from Settings → Advanced when FFmpeg is not available on `PATH`. Node.js 20+ and the existing SQLite dependency are required. No Docker is used.
 
 ## Run and test
 
@@ -44,4 +44,3 @@ npm run build
 The content workflow integration test uses a deterministic local image server and covers project creation, five-frame carousel roles, narrative generation, image selection, preview rendering, final generation, ZIP packaging, and MP4 preview rendering. Real Pinterest media must be reachable by the local API for normalization; corrupt or unreachable media is recorded as a retryable generation failure.
 
 Publishing, scheduling, TikTok, Instagram, Facebook, account authentication, analytics, automatic uploads, and reusable templates are outside this phase. Generated assets are reusable files that can be downloaded and uploaded manually later.
-

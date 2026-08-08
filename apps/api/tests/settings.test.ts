@@ -84,6 +84,31 @@ describe("local browser extension settings", () => {
     expect(settings.json()).not.toHaveProperty("integrationToken");
   });
 
+  it("exposes advanced defaults without secrets and validates runtime updates", async () => {
+    db = createDatabase(":memory:");
+    app = await buildApp({
+      db,
+      settings: { ...config, localIntegrationToken: token },
+    });
+
+    const settings = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(settings.json().advanced).toMatchObject({
+      host: config.host,
+      port: config.port,
+      maxPinsPerImport: config.maxPinsPerImport,
+    });
+    expect(settings.json().advanced).not.toHaveProperty("secretsEncryptionKey");
+
+    const invalid = await app.inject({
+      method: "PATCH",
+      url: "/api/settings/advanced",
+      headers: { "x-local-integration-token": token },
+      payload: { port: 70_000 },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error.code).toBe("INVALID_RUNTIME_SETTINGS");
+  });
+
   it("bootstraps the local client and rotates the token without restarting", async () => {
     db = createDatabase(":memory:");
     app = await buildApp({

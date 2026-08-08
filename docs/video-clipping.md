@@ -16,17 +16,9 @@ Remote API keys are sent only to authenticated backend mutations, encrypted with
 
 ## Runtime configuration
 
-No runtime `.env` is required for a local installation. The following values are optional advanced overrides:
+Local installations do not require a `.env` file. Open **Settings → Advanced** to inspect or change the non-sensitive runtime defaults. Changes to the API endpoint, storage paths, and other process-level settings are persisted in `data/tokia-settings.json` and may require an API restart.
 
-```text
-APP_SECRETS_ENCRYPTION_KEY=replace-with-a-long-random-secret
-FFMPEG_PATH=ffmpeg
-FFPROBE_PATH=ffprobe
-MAX_UPLOAD_BYTES=262144000
-CONTENT_STORAGE_DIRECTORY=./data/content
-```
-
-FFmpeg and FFprobe must be installed and available to the API process. Video binaries and rendered clips are stored under the content storage directory; SQLite stores metadata, processing state, transcripts, selections, settings, and safe error information.
+Tokia generates and stores its encryption key in `data/.tokia-secrets.json`; it is an internal secret and is never shown in the UI. FFmpeg and FFprobe must be installed and available to the API process, unless they are bundled by a future desktop installer. Video binaries and rendered clips are stored under the configured content storage directory; SQLite stores metadata, processing state, transcripts, selections, settings, and safe error information.
 
 ## Processing and recovery
 
