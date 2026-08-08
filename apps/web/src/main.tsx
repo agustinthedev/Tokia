@@ -1635,7 +1635,19 @@ function extensionIdFromMessage(event: MessageEvent): string | null {
   return data.extensionId.toLowerCase();
 }
 
-function requestExtensionId(): Promise<string> {
+function extensionConfigurationFromMessage(event: MessageEvent): { extensionId: string; ok: boolean; error?: string } | null {
+  if (event.source !== window || event.origin !== window.location.origin) return null;
+  const data = event.data as { source?: string; type?: string; extensionId?: unknown; ok?: unknown; error?: unknown } | undefined;
+  if (data?.source !== "tokia-browser-extension" || data.type !== "EXTENSION_CONFIGURED") return null;
+  if (typeof data.extensionId !== "string" || !extensionIdPattern.test(data.extensionId)) return null;
+  return {
+    extensionId: data.extensionId.toLowerCase(),
+    ok: data.ok === true,
+    error: typeof data.error === "string" ? data.error : undefined,
+  };
+}
+
+function configureExtension(extensionId: string, backendUrl: string): Promise<void> {
   return new Promise((resolve, reject) => {
     let timeout = 0;
     const cleanup = (): void => {
@@ -1643,18 +1655,19 @@ function requestExtensionId(): Promise<string> {
       window.clearTimeout(timeout);
     };
     const onMessage = (event: MessageEvent): void => {
-      const extensionId = extensionIdFromMessage(event);
-      if (!extensionId) return;
+      const result = extensionConfigurationFromMessage(event);
+      if (!result || result.extensionId !== extensionId) return;
       cleanup();
-      resolve(extensionId);
+      if (result.ok) resolve();
+      else reject(new Error(result.error ?? "The extension settings could not be saved."));
     };
     window.addEventListener("message", onMessage);
     timeout = window.setTimeout(() => {
       cleanup();
-      reject(new Error("Tokia could not detect the extension. Load or reload it, then try again."));
+      reject(new Error("The extension was detected, but it did not confirm its settings update."));
     }, 1800);
     window.postMessage(
-      { source: "tokia-web-app", type: "REQUEST_EXTENSION_ID" },
+      { source: "tokia-web-app", type: "CONFIGURE_EXTENSION", extensionId, backendUrl },
       window.location.origin,
     );
   });
@@ -1662,13 +1675,17 @@ function requestExtensionId(): Promise<string> {
 
 function BrowserExtensionSettings({
   initialId,
+  backendUrl,
   onSaved,
 }: {
   initialId?: string | null;
+  backendUrl: string;
   onSaved: (value: AnyRecord) => void;
 }): ReactElement {
   const [extensionId, setExtensionId] = useState(initialId ?? "");
   const [detectedExtensionId, setDetectedExtensionId] = useState<string | null>(null);
+  const [detectionState, setDetectionState] = useState<"checking" | "detected" | "missing">("checking");
+  const [detectionAttempt, setDetectionAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
@@ -1676,26 +1693,38 @@ function BrowserExtensionSettings({
 
   useEffect(() => setExtensionId(initialId ?? ""), [initialId]);
   useEffect(() => {
+    let active = true;
     const handleMessage = (event: MessageEvent): void => {
       const detected = extensionIdFromMessage(event);
-      if (detected) setDetectedExtensionId(detected);
+      if (detected && active) {
+        setDetectedExtensionId(detected);
+        setDetectionState("detected");
+      }
     };
+    setDetectedExtensionId(null);
+    setDetectionState("checking");
     window.addEventListener("message", handleMessage);
     window.postMessage(
       { source: "tokia-web-app", type: "REQUEST_EXTENSION_ID" },
       window.location.origin,
     );
-    return () => window.removeEventListener("message", handleMessage);
-  }, []);
+    const timeout = window.setTimeout(() => {
+      if (active) setDetectionState("missing");
+    }, 1800);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [detectionAttempt]);
 
-  const saveExtensionId = async (value: string, message: string): Promise<void> => {
+  const saveExtensionId = async (value: string): Promise<void> => {
     const saved = await request<AnyRecord>("/api/settings/browser-extension", {
       method: "PATCH",
       body: JSON.stringify({ extensionId: value }),
     });
     onSaved(saved);
     setExtensionId(saved.browserExtensionId ?? "");
-    setNotice(message);
   };
 
   const connect = async (): Promise<void> => {
@@ -1703,9 +1732,12 @@ function BrowserExtensionSettings({
     setError("");
     setNotice("");
     try {
-      const detected = detectedExtensionId ?? (await requestExtensionId());
+      const detected = detectedExtensionId;
+      if (!detected) throw new Error("The extension is not detected on this page.");
       setDetectedExtensionId(detected);
-      await saveExtensionId(detected, "Extension connected successfully.");
+      await configureExtension(detected, backendUrl);
+      await saveExtensionId(detected);
+      setNotice("Extension connected and backend URL configured successfully.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not connect the extension");
     } finally {
@@ -1719,7 +1751,8 @@ function BrowserExtensionSettings({
     setError("");
     setNotice("");
     try {
-      await saveExtensionId(extensionId.trim(), extensionId.trim() ? "Extension origin saved." : "Extension origin cleared.");
+      await saveExtensionId(extensionId.trim());
+      setNotice(extensionId.trim() ? "Extension origin saved." : "Extension origin cleared.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the extension ID");
     } finally {
@@ -1735,21 +1768,48 @@ function BrowserExtensionSettings({
           <h2>Extension connection</h2>
         </div>
         <span className={`setting-value ${extensionId ? "online" : ""}`}>
-          {extensionId ? "Connected" : "Not connected"}
+          {detectionState === "checking"
+            ? "Checking…"
+            : detectedExtensionId
+              ? detectedExtensionId === extensionId
+                ? "Connected"
+                : "Detected"
+              : "Not detected"}
         </span>
       </div>
       <p className="settings-help">
-        Connect the extension after loading it in your browser. Tokia will read its browser-generated ID automatically; the backend URL and local integration token remain in the extension settings.
+        Connect the extension after loading it in your browser. Tokia will read its browser-generated ID and save the backend URL automatically; the local integration token remains in the extension settings.
       </p>
-      <div className="extension-connect-card">
-        <div>
-          <strong>{detectedExtensionId ? "Extension detected" : "Ready to connect"}</strong>
-          <span>{detectedExtensionId ? "The installed Tokia extension is available on this page." : "The extension must be loaded in Chrome or Brave first."}</span>
+      {detectionState === "checking" && (
+        <div className="extension-connect-card">
+          <div>
+            <strong>Checking for the Tokia extension…</strong>
+            <span>Waiting for the installed extension to respond.</span>
+          </div>
         </div>
-        <Button variant="primary" onClick={() => void connect()} disabled={connecting || saving}>
-          {connecting ? "Connecting…" : "Connect extension"}
-        </Button>
-      </div>
+      )}
+      {detectionState === "missing" && (
+        <div className="extension-detection-alert">
+          <div>
+            <strong>Tokia extension not detected</strong>
+            <span>Reload the extension in the browser extensions page, then reload Tokia and try again.</span>
+          </div>
+          <Button onClick={() => setDetectionAttempt((value) => value + 1)} disabled={connecting || saving}>
+            Retry detection
+          </Button>
+        </div>
+      )}
+      {detectionState === "detected" && (
+        <div className="extension-connect-card">
+          <div>
+            <strong>Extension detected</strong>
+            <span>The installed Tokia extension is available on this page.</span>
+          </div>
+          <Button variant="primary" onClick={() => void connect()} disabled={connecting || saving}>
+            {connecting ? "Connecting…" : "Connect extension"}
+          </Button>
+        </div>
+      )}
       {error && <div className="inline-error">{error}</div>}
       {notice && <div className="inline-note">{notice}</div>}
       <details className="extension-manual-settings">
@@ -1851,6 +1911,7 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
           </div>
           <BrowserExtensionSettings
             initialId={data?.browserExtensionId}
+            backendUrl={data?.backendBaseUrl ?? API_BASE}
             onSaved={() => setSettingsRefresh((value) => value + 1)}
           />
         </>
