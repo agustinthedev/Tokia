@@ -141,12 +141,6 @@ export function normalizeCapabilities(
   } as ProviderCapabilities;
 }
 
-export function maskSecret(secret: string | null | undefined): string | null {
-  if (!secret) return null;
-  const suffix = secret.slice(-4);
-  return `••••••••••••${suffix}`;
-}
-
 export function encryptSecret(
   secret: string,
   masterSecret: string,
@@ -353,7 +347,6 @@ export function providerSafe(row: Row): Row {
     config,
     localRuntimeConfigured,
     status: row.status,
-    apiKey: row.secret_suffix ? maskSecret(`••••${row.secret_suffix}`) : null,
     hasCredential: Boolean(row.encrypted_secret),
     lastErrorCode: row.last_error_code,
     lastErrorMessage: row.last_error_message,

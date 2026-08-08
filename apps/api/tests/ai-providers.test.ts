@@ -42,7 +42,8 @@ describe("AI provider security and capability model", () => {
     );
     expect(row.encrypted_secret).not.toContain("sk-test-secret-1234");
     expect(String(row.config_json)).not.toContain("should-not-be-persisted");
-    expect(providerSafe(row).apiKey).not.toContain("sk-test-secret-1234");
+    expect(providerSafe(row)).not.toHaveProperty("apiKey");
+    expect(providerSafe(row).hasCredential).toBe(true);
     expect(
       hasRequiredCapability({ ...row, status: "connected" }, "TRANSCRIPTION"),
     ).toBe(true);

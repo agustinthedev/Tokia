@@ -67,7 +67,8 @@ describe("clipping workflow integration", () => {
       },
     });
     expect(providerResponse.statusCode).toBe(201);
-    expect(providerResponse.json().apiKey).not.toContain("sk-test-secret");
+    expect(providerResponse.json()).not.toHaveProperty("apiKey");
+    expect(providerResponse.json().hasCredential).toBe(true);
     const providerId = providerResponse.json().id as string;
     db.prepare(
       "UPDATE ai_provider_connections SET status = 'connected' WHERE id = ?",

@@ -452,7 +452,7 @@ export function AiProvidersPage(): ReactElement {
                       : provider.status === "connection_failed"
                         ? `Last validation failed${provider.lastErrorMessage ? `: ${provider.lastErrorMessage}` : ""}`
                         : provider.hasCredential
-                          ? "Credential saved (masked)"
+                          ? "Credential saved"
                           : "No remote credential"}
                     {provider.lastValidatedAt
                       ? ` · ${provider.status === "connected" ? "validated" : "checked"} ${new Date(provider.lastValidatedAt).toLocaleString()}`
