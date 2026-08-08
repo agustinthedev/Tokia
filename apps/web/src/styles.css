@@ -134,6 +134,12 @@ h3 { font-size: 16px; letter-spacing: -.02em; }
 .extension-status-row > div:first-child { flex: 1; }
 .extension-status-row > .extension-row-actions { flex: 0 0 auto; }
 @media (max-width: 580px) { .extension-token-row, .extension-status-row { align-items: flex-start; flex-direction: column; }.extension-row-actions { width: 100%; justify-content: flex-start; } }
+.advanced-settings-form { display: grid; gap: 22px; }
+.advanced-settings-block { border-top: 1px solid var(--border); padding-top: 20px; }
+.advanced-settings-heading { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.advanced-settings-heading h3 { font-size: 14px; margin-bottom: 5px; }
+.advanced-settings-heading span { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.advanced-settings-actions { justify-content: flex-end; margin-top: 0; }
 
 .wizard-progress { display: flex; gap: 6px; margin: -4px 0 22px; overflow-x: auto; padding-bottom: 3px; }
 .wizard-progress button { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; color: var(--muted-2); padding: 6px 8px; white-space: nowrap; font-size: 11px; }

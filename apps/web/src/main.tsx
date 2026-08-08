@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
+import { StrictMode, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactElement, type ReactNode, type SyntheticEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { InfiniteAssetFooter, useInfiniteAssets } from "./asset-pagination";
 import { bindPreviewGallery } from "./preview-gallery";
@@ -12,11 +12,27 @@ type AnyRecord = Record<string, any>;
 type PageKey = "home" | "collections" | "assets" | "projects" | "imports" | "settings";
 type SettingsTab =
   | "connection"
+  | "advanced"
   | "api"
   | "preview"
   | "assets"
   | "imports"
   | "ai-providers";
+interface AdvancedRuntimeSettings {
+  host: string;
+  port: number;
+  databasePath: string;
+  contentStorageDirectory: string;
+  ffmpegPath: string;
+  ffprobePath: string;
+  maxUploadBytes: number;
+  modelProvider: string;
+  modelName: string;
+  maxPinsPerImport: number;
+  maxRequestBytes: number;
+  corsAllowedOrigins: string[];
+  logLevel: string;
+}
 type MediaKind = "image" | "video" | "animated";
 
 interface Pagination {
@@ -321,7 +337,7 @@ function settingsTabFromUrl(): SettingsTab {
   const tab = new URLSearchParams(window.location.search).get("tab");
   if (window.location.pathname === "/assets") return "assets";
   if (window.location.pathname === "/imports") return "imports";
-  return tab === "api" || tab === "preview" || tab === "assets" || tab === "imports" || tab === "ai-providers"
+  return tab === "api" || tab === "advanced" || tab === "preview" || tab === "assets" || tab === "imports" || tab === "ai-providers"
     ? tab
     : "connection";
 }
@@ -1883,6 +1899,151 @@ function BrowserExtensionSettings({
   );
 }
 
+interface AdvancedSettingsForm {
+  host: string;
+  port: string;
+  databasePath: string;
+  contentStorageDirectory: string;
+  ffmpegPath: string;
+  ffprobePath: string;
+  maxUploadMiB: string;
+  modelProvider: string;
+  modelName: string;
+  maxPinsPerImport: string;
+  maxRequestMiB: string;
+  corsAllowedOrigins: string;
+  logLevel: string;
+}
+
+function bytesToMiB(value: number): string {
+  return String(Math.max(1, Math.round(value / (1024 * 1024))));
+}
+function advancedSettingsForm(settings: AdvancedRuntimeSettings): AdvancedSettingsForm {
+  return {
+    host: settings.host,
+    port: String(settings.port),
+    databasePath: settings.databasePath,
+    contentStorageDirectory: settings.contentStorageDirectory,
+    ffmpegPath: settings.ffmpegPath,
+    ffprobePath: settings.ffprobePath,
+    maxUploadMiB: bytesToMiB(settings.maxUploadBytes),
+    modelProvider: settings.modelProvider,
+    modelName: settings.modelName,
+    maxPinsPerImport: String(settings.maxPinsPerImport),
+    maxRequestMiB: bytesToMiB(settings.maxRequestBytes),
+    corsAllowedOrigins: settings.corsAllowedOrigins.join("\n"),
+    logLevel: settings.logLevel,
+  };
+}
+function AdvancedSettingsPanel({ data }: { data: AnyRecord | null }): ReactElement {
+  const advanced = data?.advanced as AdvancedRuntimeSettings | undefined;
+  const defaults = data?.advancedDefaults as AdvancedRuntimeSettings | undefined;
+  const [form, setForm] = useState<AdvancedSettingsForm | null>(advanced ? advancedSettingsForm(advanced) : null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (advanced) setForm(advancedSettingsForm(advanced));
+  }, [data?.advanced]);
+  const update = (field: keyof AdvancedSettingsForm) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>): void => {
+    setForm((current) => current ? { ...current, [field]: event.target.value } : current);
+  };
+  const resetDefaults = (): void => {
+    if (defaults) setForm(advancedSettingsForm(defaults));
+    setError("");
+    setNotice("Defaults loaded in the form. Save to apply them.");
+  };
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!form) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await request<AnyRecord>("/api/settings/advanced", {
+        method: "PATCH",
+        body: JSON.stringify({
+          host: form.host.trim(),
+          port: Number(form.port),
+          databasePath: form.databasePath.trim(),
+          contentStorageDirectory: form.contentStorageDirectory.trim(),
+          ffmpegPath: form.ffmpegPath.trim(),
+          ffprobePath: form.ffprobePath.trim(),
+          maxUploadBytes: Math.round(Number(form.maxUploadMiB) * 1024 * 1024),
+          modelProvider: form.modelProvider.trim(),
+          modelName: form.modelName.trim(),
+          maxPinsPerImport: Number(form.maxPinsPerImport),
+          maxRequestBytes: Math.round(Number(form.maxRequestMiB) * 1024 * 1024),
+          corsAllowedOrigins: form.corsAllowedOrigins.split(/\r?\n|,/).map((origin) => origin.trim()).filter(Boolean),
+          logLevel: form.logLevel,
+        }),
+      });
+      if (saved.advanced) setForm(advancedSettingsForm(saved.advanced as AdvancedRuntimeSettings));
+      setNotice(saved.message ?? "Advanced settings saved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save advanced settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <section className="panel settings-section advanced-settings-panel">
+      <div className="panel-heading">
+        <div>
+          <div className="eyebrow">Advanced</div>
+          <h2>Runtime settings</h2>
+        </div>
+        <span className="setting-value">Optional</span>
+      </div>
+      <p className="settings-help">These values have safe defaults for a local installation. Most users never need to change them. They are stored by Tokia, so no <code>.env</code> file is required.</p>
+      {!form ? <PageLoading /> : (
+        <form className="advanced-settings-form" onSubmit={(event) => void submit(event)}>
+          <div className="advanced-settings-block">
+            <div className="advanced-settings-heading"><div><h3>Server and storage</h3><span>Changes to the API endpoint or storage paths require an API restart.</span></div></div>
+            <div className="form-row">
+              <label className="form-field"><span>API host</span><input value={form.host} onChange={update("host")} autoComplete="off" /><small>Usually 127.0.0.1 for local use.</small></label>
+              <label className="form-field"><span>API port</span><input type="number" min="1" max="65535" value={form.port} onChange={update("port")} /><small>Default: 3000.</small></label>
+            </div>
+            <div className="form-row">
+              <label className="form-field"><span>Database path</span><input value={form.databasePath} onChange={update("databasePath")} autoComplete="off" /><small>Keep the SQLite file and its generated secret together.</small></label>
+              <label className="form-field"><span>Content storage directory</span><input value={form.contentStorageDirectory} onChange={update("contentStorageDirectory")} autoComplete="off" /><small>Derived videos, previews, and exported files.</small></label>
+            </div>
+          </div>
+          <div className="advanced-settings-block">
+            <div className="advanced-settings-heading"><div><h3>Processing limits</h3><span>Increase these only when the machine has enough disk space and memory.</span></div></div>
+            <div className="form-row">
+              <label className="form-field"><span>Maximum video upload (MiB)</span><input type="number" min="1" step="1" value={form.maxUploadMiB} onChange={update("maxUploadMiB")} /><small>Default: 250 MiB.</small></label>
+              <label className="form-field"><span>Maximum request size (MiB)</span><input type="number" min="1" step="1" value={form.maxRequestMiB} onChange={update("maxRequestMiB")} /><small>Default: 10 MiB for API requests.</small></label>
+            </div>
+            <div className="form-row">
+              <label className="form-field"><span>Maximum Pins per import</span><input type="number" min="1" max="10000" step="1" value={form.maxPinsPerImport} onChange={update("maxPinsPerImport")} /><small>Default: 2,000 Pins.</small></label>
+              <label className="form-field"><span>Log level</span><select value={form.logLevel} onChange={update("logLevel")}>{["trace", "debug", "info", "warn", "error", "fatal", "silent"].map((level) => <option key={level} value={level}>{level}</option>)}</select><small>Use debug or trace only while diagnosing an issue.</small></label>
+            </div>
+          </div>
+          <div className="advanced-settings-block">
+            <div className="advanced-settings-heading"><div><h3>Processing tools and model defaults</h3><span>Leave the executable names as-is when FFmpeg is available on the system PATH.</span></div></div>
+            <div className="form-row">
+              <label className="form-field"><span>FFmpeg executable</span><input value={form.ffmpegPath} onChange={update("ffmpegPath")} autoComplete="off" /></label>
+              <label className="form-field"><span>FFprobe executable</span><input value={form.ffprobePath} onChange={update("ffprobePath")} autoComplete="off" /></label>
+            </div>
+            <div className="form-row">
+              <label className="form-field"><span>Model provider</span><input value={form.modelProvider} onChange={update("modelProvider")} autoComplete="off" /></label>
+              <label className="form-field"><span>Model name</span><input value={form.modelName} onChange={update("modelName")} autoComplete="off" /></label>
+            </div>
+          </div>
+          <div className="advanced-settings-block">
+            <div className="advanced-settings-heading"><div><h3>Allowed web origins</h3><span>One origin per line. The connected browser extension is managed separately.</span></div></div>
+            <label className="form-field"><span>CORS allowed origins</span><textarea rows={4} value={form.corsAllowedOrigins} onChange={update("corsAllowedOrigins")} spellCheck={false} /><small>Keep the default localhost origins unless you know you need another local client.</small></label>
+          </div>
+          {error && <div className="inline-error">{error}</div>}
+          {notice && <div className="inline-note">{notice}</div>}
+          <div className="detail-actions advanced-settings-actions"><Button type="button" onClick={resetDefaults} disabled={saving}>Reset defaults</Button><Button type="submit" variant="primary" disabled={saving}>{saving ? "Saving..." : "Save advanced settings"}</Button></div>
+        </form>
+      )}
+    </section>
+  );
+}
+
 function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }): ReactElement {
   const [settingsRefresh, setSettingsRefresh] = useState(0);
   const { data, loading, error } = useApi<AnyRecord>("/api/settings", settingsRefresh);
@@ -1904,6 +2065,7 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
             ["ai-providers", "AI Providers", "settings"],
             ["assets", "Assets", "assets"],
             ["imports", "Imports", "imports"],
+            ["advanced", "Advanced", "settings"],
             ["api", "API", "arrow"],
           ] as const
         ).map(([key, label, icon]) => (
@@ -1961,6 +2123,7 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
           />
         </>
       )}
+      {tab === "advanced" && <AdvancedSettingsPanel data={data} />}
       {tab === "api" && (
         <section className="panel settings-section api-docs-panel">
           <div className="panel-heading">
