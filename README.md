@@ -217,8 +217,8 @@ El resultado queda en `apps/extension/dist`.
 3. Elegir `Load unpacked`.
 4. Seleccionar `apps/extension/dist`.
 5. Copiar el ID de la extensión, por ejemplo `abcdefghijklmnop...`.
-6. Agregar `chrome-extension://ID_COPIADO` a `CORS_ALLOWED_ORIGINS` en `.env`.
-7. Reiniciar el API después de cambiar `.env`.
+6. En Tokia, abrir `Settings > Connection > Extension connection` y pegar ese ID.
+7. Guardar el ID. El origen CORS queda persistido en SQLite y no hace falta editar `.env` ni reiniciar el API.
 
 ### Cargar en Brave
 
@@ -226,13 +226,15 @@ El resultado queda en `apps/extension/dist`.
 2. Activar `Developer mode`.
 3. Elegir `Load unpacked`.
 4. Seleccionar la misma carpeta `apps/extension/dist`.
-5. Agregar el origen `chrome-extension://ID_DE_BRAVE` a `CORS_ALLOWED_ORIGINS` si el ID difiere.
+5. En Tokia, abrir `Settings > Connection > Extension connection` y guardar el ID de Brave si difiere del de Chrome.
 
 En el popup `Open settings` permite configurar:
 
 - Backend URL, por defecto `http://localhost:3000`.
 - Token local.
 - Máximo de Pins, duración máxima, rondas sin novedades, espera entre rondas y proporción de scroll.
+
+El ID de la extensión solamente configura el origen permitido por CORS. El `Local integration token` es un valor independiente y debe coincidir entre el API y la opción propia de la extensión; nunca se muestra completo en la aplicación web.
 
 El popup muestra detección de página, nombre/URL/ID de board, estado de conexión, progreso, Pins únicos, resultado y errores. Las acciones son `Scan visible Pins`, `Scan entire board`, `Stop scan`, `Send to application`, `Copy JSON`, `Download JSON`, `Test connection` y `Open settings`.
 

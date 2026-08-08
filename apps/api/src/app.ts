@@ -77,6 +77,7 @@ import { MediaProcessingError } from "./content-media.js";
 type AppSettings = typeof defaultConfig;
 type QueryRecord = Record<string, string | undefined>;
 type Row = Record<string, any>;
+const BROWSER_EXTENSION_SETTING_KEY = "browser_extension_id";
 
 function positiveInt(
   value: string | undefined,
@@ -116,6 +117,31 @@ function text(value: unknown, max = 10_000): string | null {
 }
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function browserExtensionIdFromOrigin(origin: string | undefined): string | null {
+  if (!origin) return null;
+  const match = /^chrome-extension:\/\/([a-p]{32})$/i.exec(origin.trim());
+  return match?.[1]?.toLowerCase() ?? null;
+}
+function browserExtensionId(db: Database.Database, settings: AppSettings): string | null {
+  const stored = db
+    .prepare("SELECT setting_value FROM application_settings WHERE setting_key = ?")
+    .get(BROWSER_EXTENSION_SETTING_KEY) as { setting_value?: string } | undefined;
+  if (stored?.setting_value) return stored.setting_value;
+  return settings.corsAllowedOrigins
+    .map((origin) => browserExtensionIdFromOrigin(origin))
+    .find((value): value is string => Boolean(value)) ?? null;
+}
+function browserExtensionOrigin(db: Database.Database, settings: AppSettings): string | null {
+  const id = browserExtensionId(db, settings);
+  return id ? `chrome-extension://${id}` : null;
+}
+function normalizeBrowserExtensionId(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") return undefined;
+  const candidate = value.trim().replace(/^chrome-extension:\/\//i, "").replace(/\/$/, "");
+  return /^[a-p]{32}$/i.test(candidate) ? candidate.toLowerCase() : undefined;
 }
 function mediaType(row: Row): string {
   if (row.media_type === "video" || row.media_type === "animated")
@@ -518,7 +544,12 @@ export async function buildApp(
 
   await app.register(cors, {
     origin: (origin, callback) =>
-      callback(null, !origin || settings.corsAllowedOrigins.includes(origin)),
+      callback(
+        null,
+        !origin ||
+          settings.corsAllowedOrigins.includes(origin) ||
+          origin === browserExtensionOrigin(db, settings),
+      ),
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -577,8 +608,58 @@ export async function buildApp(
       databaseFile: path.basename(settings.databasePath),
       backendBaseUrl: `http://${settings.host}:${settings.port}`,
       integrationTokenConfigured: Boolean(settings.localIntegrationToken),
+      browserExtensionConfigured: Boolean(browserExtensionId(db, settings)),
+      browserExtensionId: browserExtensionId(db, settings),
+      browserExtensionOrigin: browserExtensionOrigin(db, settings),
       maxPinsPerImport: settings.maxPinsPerImport,
     }),
+  );
+  app.patch(
+    "/api/settings/browser-extension",
+    {
+      schema: {
+        tags: ["diagnostics"],
+        summary: "Configure the browser extension origin",
+        body: {
+          type: "object",
+          properties: { extensionId: { type: "string", maxLength: 80 } },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!integrationGuard(settings, request, reply)) return;
+      const body = bodyOf(request);
+      const rawExtensionId = body.extensionId;
+      const extensionId = normalizeBrowserExtensionId(rawExtensionId);
+      if (rawExtensionId !== undefined && extensionId === undefined) {
+        return reply.code(400).send({
+          error: {
+            code: "INVALID_BROWSER_EXTENSION_ID",
+            message: "Enter the 32-character ID copied from the browser extension page.",
+          },
+        });
+      }
+
+      if (extensionId) {
+        db.prepare(
+          `INSERT INTO application_settings(setting_key, setting_value, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at`,
+        ).run(BROWSER_EXTENSION_SETTING_KEY, extensionId, now());
+      } else if (rawExtensionId !== undefined) {
+        db.prepare("DELETE FROM application_settings WHERE setting_key = ?").run(
+          BROWSER_EXTENSION_SETTING_KEY,
+        );
+      }
+
+      const savedId = browserExtensionId(db, settings);
+      return {
+        browserExtensionConfigured: Boolean(savedId),
+        browserExtensionId: savedId,
+        browserExtensionOrigin: browserExtensionOrigin(db, settings),
+      };
+    },
   );
 
   app.get(

@@ -1624,8 +1624,82 @@ function ImportDialog({ run, onClose }: { run: ImportRun; onClose: () => void })
   );
 }
 
+function BrowserExtensionSettings({
+  initialId,
+  onSaved,
+}: {
+  initialId?: string | null;
+  onSaved: (value: AnyRecord) => void;
+}): ReactElement {
+  const [extensionId, setExtensionId] = useState(initialId ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => setExtensionId(initialId ?? ""), [initialId]);
+
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await request<AnyRecord>("/api/settings/browser-extension", {
+        method: "PATCH",
+        body: JSON.stringify({ extensionId: extensionId.trim() }),
+      });
+      onSaved(saved);
+      setExtensionId(saved.browserExtensionId ?? "");
+      setNotice(saved.browserExtensionId ? "Extension origin saved." : "Extension origin cleared.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save the extension ID");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="panel settings-section">
+      <div className="panel-heading">
+        <div>
+          <div className="eyebrow">Browser extension</div>
+          <h2>Extension connection</h2>
+        </div>
+        <span className={`setting-value ${extensionId ? "online" : ""}`}>
+          {extensionId ? "Configured" : "Not configured"}
+        </span>
+      </div>
+      <p className="settings-help">
+        Copy the ID from <code>chrome://extensions</code> or <code>brave://extensions</code>. This allows the browser extension to call this local API without editing <code>.env</code>.
+      </p>
+      <form onSubmit={submit}>
+        <label className="form-field">
+          <span>Browser extension ID</span>
+          <input
+            value={extensionId}
+            onChange={(event) => setExtensionId(event.target.value)}
+            placeholder="32 lowercase letters from a to p"
+            maxLength={80}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <small>The extension still needs the backend URL and local integration token in its own Open settings page.</small>
+        </label>
+        {error && <div className="inline-error">{error}</div>}
+        {notice && <div className="inline-note">{notice}</div>}
+        <div className="detail-actions">
+          <Button variant="primary" type="submit" disabled={saving}>
+            {saving ? "Saving…" : "Save extension ID"}
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }): ReactElement {
-  const { data, loading, error } = useApi<AnyRecord>("/api/settings");
+  const [settingsRefresh, setSettingsRefresh] = useState(0);
+  const { data, loading, error } = useApi<AnyRecord>("/api/settings", settingsRefresh);
   const health = useApi<AnyRecord>("/api/health");
   const [tab, setTab] = useState<SettingsTab>(settingsTabFromUrl());
   const selectTab = (next: SettingsTab): void => {
@@ -1704,6 +1778,10 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
               </Button>
             </div>
           </section>
+          <BrowserExtensionSettings
+            initialId={data?.browserExtensionId}
+            onSaved={() => setSettingsRefresh((value) => value + 1)}
+          />
         </>
       )}
       {tab === "preview" && (
