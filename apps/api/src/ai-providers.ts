@@ -435,9 +435,17 @@ async function providerFetch(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const secret = row.encrypted_secret
-      ? decryptSecret(String(row.encrypted_secret), masterSecret)
-      : "";
+    let secret = "";
+    if (row.encrypted_secret) {
+      try {
+        secret = decryptSecret(String(row.encrypted_secret), masterSecret);
+      } catch {
+        throw providerError(
+          "INVALID_CREDENTIAL",
+          "The saved provider credential could not be decrypted. Re-enter it.",
+        );
+      }
+    }
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${secret}`);
     if (!headers.has("Content-Type") && !(init.body instanceof FormData))
