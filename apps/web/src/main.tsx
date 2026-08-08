@@ -2006,8 +2006,8 @@ function AdvancedSettingsPanel({ data }: { data: AnyRecord | null }): ReactEleme
               <label className="form-field"><span>API port</span><input type="number" min="1" max="65535" value={form.port} onChange={update("port")} /><small>Default: 3000.</small></label>
             </div>
             <div className="form-row">
-              <label className="form-field"><span>Database path</span><input value={form.databasePath} onChange={update("databasePath")} autoComplete="off" /><small>Keep the SQLite file and its generated secret together.</small></label>
-              <label className="form-field"><span>Content storage directory</span><input value={form.contentStorageDirectory} onChange={update("contentStorageDirectory")} autoComplete="off" /><small>Derived videos, previews, and exported files.</small></label>
+              <label className="form-field"><span>Database path</span><input value={form.databasePath} onChange={update("databasePath")} autoComplete="off" /><small>Changing it points Tokia to another database after restart; files are not moved automatically.</small></label>
+              <label className="form-field"><span>Content storage directory</span><input value={form.contentStorageDirectory} onChange={update("contentStorageDirectory")} autoComplete="off" /><small>Changing it affects future files; existing content stays in its current folder.</small></label>
             </div>
           </div>
           <div className="advanced-settings-block">
