@@ -12,11 +12,11 @@ Open **Settings → AI Providers**. Add one or more of:
 
 Assign providers to **Transcription** and **Text analysis**. Clipping preflight requires a connected transcription provider with audio transcription and timestamped segments, plus a connected analysis provider with text generation and structured output or JSON mode. The wizard blocks upload processing until those capabilities are available.
 
-Remote API keys are sent only to authenticated backend mutations, encrypted with AES-256-GCM using `APP_SECRETS_ENCRYPTION_KEY`, and never returned to the browser. Keep the encryption key outside SQLite and rotate it through a versioned secret-management process before changing deployments.
+Remote API keys are sent only to authenticated backend mutations, encrypted with AES-256-GCM, and never returned to the browser. For local installations, Tokia generates and persists the encryption key in `data/.tokia-secrets.json`; deployments may override it with `APP_SECRETS_ENCRYPTION_KEY` and manage that secret externally.
 
 ## Runtime configuration
 
-Copy the relevant values from `.env.example`:
+No runtime `.env` is required for a local installation. The following values are optional advanced overrides:
 
 ```text
 APP_SECRETS_ENCRYPTION_KEY=replace-with-a-long-random-secret

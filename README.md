@@ -43,10 +43,11 @@ Desde la raíz del repositorio:
 
 ```bash
 npm install
-copy .env.example .env
 ```
 
-En PowerShell, el equivalente de `copy` es `Copy-Item .env.example .env`.
+No es necesario crear un `.env` para una instalaciÃ³n local. Tokia genera y persiste automÃ¡ticamente sus secretos de runtime, y la configuraciÃ³n de proveedores, integraciÃ³n local y extensiÃ³n se realiza desde la interfaz.
+
+El `.env` queda disponible Ãºnicamente como compatibilidad para sobrescribir valores avanzados en entornos de desarrollo.
 
 Variables disponibles:
 
@@ -55,20 +56,20 @@ Variables disponibles:
 | `HOST` | `127.0.0.1` | Interfaz local del API. |
 | `PORT` | `3000` | Puerto del API. |
 | `DATABASE_PATH` | `./data/tokia.sqlite` | Ruta relativa al workspace del API. |
-| `LOCAL_INTEGRATION_TOKEN` | `tokia-local-dev-token` en `.env.example` | Token requerido para imports y cambios de estado. Si se omite, el proceso genera uno aleatorio no persistente; para la extensión conviene configurarlo explícitamente. |
+| `LOCAL_INTEGRATION_TOKEN` | Generado y persistido en SQLite | Override opcional del token local. En el uso normal se administra desde Settings. |
 | `MAX_PINS_PER_IMPORT` | `2000` | Máximo de Pins por importación. |
 | `MAX_REQUEST_BYTES` | `10485760` | Máximo de request, 10 MiB. |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Orígenes exactos separados por comas. Agregar el origen de la extensión luego de cargarla. |
+| `CORS_ALLOWED_ORIGINS` | Orígenes locales de Vite y Tokia | Override opcional de los orígenes exactos separados por comas. El origen de la extensión se persiste desde Settings. |
 | `LOG_LEVEL` | `info` | Nivel de logs estructurados. |
 | `CONTENT_STORAGE_DIRECTORY` | `./data/content` | Directorio para derivados de contenido, previews y archivos finales. |
 | `FFPROBE_PATH` | `ffprobe` | Ejecutable FFprobe usado para inspeccionar fuentes de clipping. |
 | `MAX_UPLOAD_BYTES` | `262144000` | Tamaño máximo de una fuente de video, 250 MiB. |
-| `APP_SECRETS_ENCRYPTION_KEY` | generado por proceso | Clave para cifrar credenciales de proveedores de IA; configurar de forma persistente en despliegues. |
+| `APP_SECRETS_ENCRYPTION_KEY` | Generada y persistida en `data/.tokia-secrets.json` | Override opcional para despliegues que administren sus propios secretos. |
 | `FFMPEG_PATH` | `ffmpeg` | Ejecutable FFmpeg usado para normalización, thumbnails y videos slideshow. |
 | `MODEL_PROVIDER` | `local` | Proveedor narrativo actual; `local` usa generación determinista sin red. |
 | `MODEL_NAME` | `structured-local-v1` | Identificador persistido junto a la configuración de generación. |
 
-El token no se escribe en logs. La extensión lo almacena en `chrome.storage.local`.
+El token no se escribe en logs. La extensión lo recibe al usar `Connect extension` y lo almacena en `chrome.storage.local`. No compartas el archivo `data/.tokia-secrets.json` ni la base SQLite con terceros si contienen credenciales configuradas.
 
 ## Base de datos y migraciones
 
@@ -249,7 +250,7 @@ El scanner:
 
 ### Verificación manual end-to-end
 
-1. Configurar `.env`, `CORS_ALLOWED_ORIGINS`, levantar el API y abrir `/api/health`.
+1. Levantar el API y abrir `/api/health`; no se requiere configurar `.env` para el uso local.
 2. Abrir Chrome o Brave con sesión Pinterest autenticada.
 3. Abrir un board, esperar a que estén visibles algunos Pins y abrir el popup de Tokia.
 4. Confirmar que el popup detecta el board y ejecutar `Scan visible Pins`.
@@ -295,7 +296,7 @@ npm run dev
 npm run dev:web
 ```
 
-The API runs at `http://127.0.0.1:3000`; the Vite app runs at `http://127.0.0.1:5173`. If the local token differs from the example value, set `VITE_INTEGRATION_TOKEN` before starting the web app. The API allows the Vite origins through `CORS_ALLOWED_ORIGINS`.
+The API runs at `http://127.0.0.1:3000`; the Vite app runs at `http://127.0.0.1:5173`. The web client bootstraps its local integration token from the API, so `VITE_INTEGRATION_TOKEN` is no longer required.
 
 Build everything with:
 
