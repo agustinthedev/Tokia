@@ -172,26 +172,37 @@ export function ClippingWizard({
     if (!video || !previewCandidate) return;
     const startSeconds = Number(previewCandidate.startMs ?? 0) / 1000;
     const endSeconds = Number(previewCandidate.endMs ?? 0) / 1000;
-    const seekToCandidate = (): void => {
+    const seekToCandidateStart = (): void => {
       if (!Number.isFinite(startSeconds) || video.readyState < 1) return;
       video.pause();
       video.currentTime = startSeconds;
     };
-    const stopAtCandidateEnd = (): void => {
-      if (endSeconds > startSeconds && video.currentTime >= endSeconds) {
-        video.pause();
+    const startCandidatePlayback = (): void => {
+      seekToCandidateStart();
+      void video.play().catch(() => undefined);
+    };
+    const keepCandidateBounds = (): void => {
+      if (endSeconds <= startSeconds || video.readyState < 1) return;
+      if (video.currentTime < startSeconds) {
         video.currentTime = startSeconds;
+        return;
+      }
+      if (video.currentTime >= endSeconds) {
+        video.pause();
+        video.currentTime = endSeconds;
       }
     };
-    video.addEventListener("loadedmetadata", seekToCandidate);
-    video.addEventListener("loadeddata", seekToCandidate);
-    video.addEventListener("timeupdate", stopAtCandidateEnd);
-    const seekTimer = window.setTimeout(seekToCandidate, 0);
+    video.addEventListener("loadedmetadata", seekToCandidateStart);
+    video.addEventListener("loadeddata", startCandidatePlayback);
+    video.addEventListener("timeupdate", keepCandidateBounds);
+    const seekTimer = window.setTimeout(startCandidatePlayback, 0);
+    const boundsTimer = window.setInterval(keepCandidateBounds, 100);
     return () => {
-      video.removeEventListener("loadedmetadata", seekToCandidate);
-      video.removeEventListener("loadeddata", seekToCandidate);
-      video.removeEventListener("timeupdate", stopAtCandidateEnd);
+      video.removeEventListener("loadedmetadata", seekToCandidateStart);
+      video.removeEventListener("loadeddata", startCandidatePlayback);
+      video.removeEventListener("timeupdate", keepCandidateBounds);
       window.clearTimeout(seekTimer);
+      window.clearInterval(boundsTimer);
     };
   }, [
     previewCandidate?.id,
