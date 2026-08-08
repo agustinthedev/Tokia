@@ -599,23 +599,6 @@ export function ClippingWizard({
               </div>
             ) : (
               <div className="topic-tree">
-                {previewCandidate && state?.source?.id && (
-                  <div className="clip-candidate-preview">
-                    <video
-                      ref={previewRef}
-                      controls
-                      preload="metadata"
-                      src={`${API_BASE}/api/clipping/source/${state.source.id}/preview`}
-                    />
-                    <div>
-                      <strong>{previewCandidate.title}</strong>
-                      <span>
-                        {ms(previewCandidate.startMs)}–
-                        {ms(previewCandidate.endMs)} · preview only
-                      </span>
-                    </div>
-                  </div>
-                )}
                 {topics.map((topic: AnyRecord) => (
                   <div className="topic-card" key={topic.id}>
                     <div className="topic-heading">
@@ -1080,6 +1063,52 @@ export function ClippingWizard({
               </Button>
               <Button onClick={close}>Done</Button>
             </div>
+          </div>
+        )}
+        {previewCandidate && state?.source?.id && (
+          <div
+            className="modal-backdrop clipping-preview-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setPreviewCandidate(null);
+            }}
+          >
+            <section
+              className="modal modal-wide clipping-preview-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Clip preview"
+            >
+              <header className="modal-header">
+                <div>
+                  <div className="eyebrow">Clip preview</div>
+                  <h2>{previewCandidate.title}</h2>
+                </div>
+                <button
+                  className="close-button"
+                  onClick={() => setPreviewCandidate(null)}
+                  aria-label="Close preview"
+                >
+                  ×
+                </button>
+              </header>
+              <video
+                ref={previewRef}
+                className="clipping-preview-video"
+                controls
+                autoPlay
+                preload="metadata"
+                src={`${API_BASE}/api/clipping/source/${state.source.id}/preview`}
+              />
+              <div className="clipping-preview-meta">
+                <strong>
+                  {ms(previewCandidate.startMs)}–{ms(previewCandidate.endMs)}
+                </strong>
+                <span>Preview only · selecting the checkbox is separate.</span>
+              </div>
+              <div className="modal-footer">
+                <Button onClick={() => setPreviewCandidate(null)}>Close</Button>
+              </div>
+            </section>
           </div>
         )}
         {notice && <div className="inline-note">{notice}</div>}

@@ -668,7 +668,66 @@ export async function structuredAnalysis<T>(
       { role: "user", content: request.user },
     ],
   };
-  if (caps.jsonMode) body.response_format = { type: "json_object" };
+  if (caps.jsonMode) {
+    if (row.provider_type === "openai" && caps.structuredOutput && request.schemaName === "video_topic_tree") {
+      const subtopicSchema = {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string", minLength: 3, maxLength: 160 },
+          summary: { type: "string", maxLength: 1000 },
+          startMs: { type: "integer", minimum: 0 },
+          endMs: { type: "integer", minimum: 1 },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+        required: ["title", "summary", "startMs", "endMs", "confidence"],
+      };
+      body.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: request.schemaName,
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              topics: {
+                type: "array",
+                minItems: 1,
+                maxItems: 12,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    title: { type: "string", minLength: 3, maxLength: 160 },
+                    summary: { type: "string", maxLength: 1000 },
+                    startMs: { type: "integer", minimum: 0 },
+                    endMs: { type: "integer", minimum: 1 },
+                    confidence: { type: "number", minimum: 0, maximum: 1 },
+                    subtopics: {
+                      type: "array",
+                      minItems: 1,
+                      maxItems: 8,
+                      items: subtopicSchema,
+                    },
+                  },
+                  required: [
+                    "title",
+                    "summary",
+                    "startMs",
+                    "endMs",
+                    "confidence",
+                    "subtopics",
+                  ],
+                },
+              },
+            },
+            required: ["topics"],
+          },
+        },
+      };
+    } else body.response_format = { type: "json_object" };
+  }
   const response = await providerFetch(row, masterSecret, "/chat/completions", {
     method: "POST",
     body: JSON.stringify(body),

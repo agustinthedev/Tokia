@@ -43,6 +43,8 @@ type ClipJobType =
   | "subtopic_detection"
   | "render_batch";
 const CLIPPING_AUDIO_FILENAME = "audio-16k.mp3";
+const MIN_CLIP_DURATION_MS = 15_000;
+const MAX_CLIP_DURATION_MS = 90_000;
 function id(): string {
   return crypto.randomUUID();
 }
@@ -716,6 +718,61 @@ interface AnalysisResponse {
     }>;
   }>;
 }
+
+function finiteMilliseconds(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number) : undefined;
+}
+
+function readableAnalysisText(value: unknown): string {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text || /^(topic|clip)(?:\s+\d+)?$/i.test(text)) return "";
+  return text.slice(0, 200);
+}
+
+function transcriptExcerpt(
+  segments: Row[],
+  startMs: number,
+  endMs: number,
+): string {
+  return segments
+    .filter(
+      (segment) =>
+        Number(segment.end_ms) > startMs && Number(segment.start_ms) < endMs,
+    )
+    .map((segment) => String(segment.text ?? "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
+function normalizeClipRange(
+  startMs: number,
+  endMs: number,
+  durationMs: number,
+): { startMs: number; endMs: number } {
+  const duration = Math.max(1, Math.round(durationMs));
+  let start = Math.max(0, Math.min(duration, Math.round(startMs)));
+  let end = Math.max(0, Math.min(duration, Math.round(endMs)));
+  if (end <= start) end = Math.min(duration, start + MIN_CLIP_DURATION_MS);
+  if (end <= start) start = Math.max(0, end - MIN_CLIP_DURATION_MS);
+  const targetDuration = Math.min(
+    duration,
+    Math.max(MIN_CLIP_DURATION_MS, Math.min(MAX_CLIP_DURATION_MS, end - start)),
+  );
+  const center = (start + end) / 2;
+  const normalizedStart = Math.max(
+    0,
+    Math.min(duration - targetDuration, Math.round(center - targetDuration / 2)),
+  );
+  return {
+    startMs: normalizedStart,
+    endMs: normalizedStart + targetDuration,
+  };
+}
+
 async function persistAnalysis(
   db: Database.Database,
   source: Row,
@@ -736,6 +793,12 @@ async function persistAnalysis(
       "INVALID_ANALYSIS_RESULT",
       "The analysis provider returned no valid topics.",
     );
+  const transcriptSegments = db
+    .prepare(
+      "SELECT start_ms, end_ms, text FROM transcript_segments WHERE transcript_id = ? ORDER BY position",
+    )
+    .all(transcript.id) as Row[];
+  const sourceDurationMs = Math.max(1, Number(source.duration_ms));
   const timestamp = now();
   db.transaction(() => {
     db.prepare("DELETE FROM video_topics WHERE source_id = ?").run(source.id);
@@ -749,19 +812,84 @@ async function persistAnalysis(
       "INSERT INTO clip_selections(id, content_id, subtopic_id, selected, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
     );
     topics.slice(0, 50).forEach((topic, topicIndex) => {
-      const startMs = Math.max(0, Math.round(Number(topic.startMs ?? 0)));
-      const endMs = Math.min(
-        source.duration_ms,
-        Math.round(Number(topic.endMs ?? source.duration_ms)),
+      const children =
+        Array.isArray(topic.subtopics) && topic.subtopics.length
+          ? topic.subtopics
+          : [
+              {
+                title: topic.title,
+                summary: topic.summary,
+                startMs: topic.startMs,
+                endMs: topic.endMs,
+                confidence: topic.confidence,
+              },
+            ];
+      const childRanges = children
+        .map((child) => ({
+          startMs: finiteMilliseconds(child.startMs),
+          endMs: finiteMilliseconds(child.endMs),
+        }))
+        .filter(
+          (range) =>
+            range.startMs !== undefined &&
+            range.endMs !== undefined &&
+            range.endMs > range.startMs,
+        ) as Array<{ startMs: number; endMs: number }>;
+      const inferredStart = childRanges.length
+        ? Math.min(...childRanges.map((range) => range.startMs))
+        : undefined;
+      const inferredEnd = childRanges.length
+        ? Math.max(...childRanges.map((range) => range.endMs))
+        : undefined;
+      const partitionStart = Math.round(
+        (sourceDurationMs * topicIndex) / topics.length,
       );
+      const partitionEnd = Math.round(
+        (sourceDurationMs * (topicIndex + 1)) / topics.length,
+      );
+      const rawTopicStart = finiteMilliseconds(topic.startMs);
+      const rawTopicEnd = finiteMilliseconds(topic.endMs);
+      const wholeSourceRange =
+        rawTopicStart !== undefined &&
+        rawTopicEnd !== undefined &&
+        rawTopicStart <= 0 &&
+        rawTopicEnd >= sourceDurationMs;
+      let startMs =
+        inferredStart !== undefined &&
+        (rawTopicStart === undefined || wholeSourceRange)
+          ? inferredStart
+          : (rawTopicStart ?? partitionStart);
+      let endMs =
+        inferredEnd !== undefined &&
+        (rawTopicEnd === undefined || wholeSourceRange)
+          ? inferredEnd
+          : (rawTopicEnd ?? partitionEnd);
+      startMs = Math.max(0, Math.min(sourceDurationMs, startMs));
+      endMs = Math.max(0, Math.min(sourceDurationMs, endMs));
+      if (endMs <= startMs) {
+        startMs = partitionStart;
+        endMs = Math.max(startMs + 1, partitionEnd);
+      }
       validateClipBounds(startMs, endMs, source.duration_ms);
       const topicId = id();
+      const topicExcerpt = transcriptExcerpt(
+        transcriptSegments,
+        startMs,
+        endMs,
+      );
+      const topicTitle =
+        readableAnalysisText(topic.title) ||
+        readableAnalysisText(topic.summary) ||
+        topicExcerpt ||
+        "Key discussion";
+      const topicSummary =
+        readableAnalysisText(topic.summary) || topicExcerpt || null;
       insertTopic.run(
         topicId,
         source.id,
         topicIndex,
-        String(topic.title ?? `Topic ${topicIndex + 1}`).slice(0, 200),
-        String(topic.summary ?? "").slice(0, 1000) || null,
+        topicTitle,
+        topicSummary,
         startMs,
         endMs,
         Number.isFinite(Number(topic.confidence))
@@ -774,35 +902,37 @@ async function persistAnalysis(
           .update(`${source.source_hash}:${topicId}`)
           .digest("hex"),
       );
-      const children =
-        Array.isArray(topic.subtopics) && topic.subtopics.length
-          ? topic.subtopics
-          : [
-              {
-                title: String(topic.title ?? "Clip candidate"),
-                summary: topic.summary,
-                startMs,
-                endMs,
-                confidence: topic.confidence,
-              },
-            ];
       children.slice(0, 30).forEach((child, childIndex) => {
-        const childStart = Math.max(
-          startMs,
-          Math.round(Number(child.startMs ?? startMs)),
+        const rawChildStart =
+          finiteMilliseconds(child.startMs) ?? startMs;
+        const rawChildEnd = finiteMilliseconds(child.endMs) ?? endMs;
+        const normalizedRange = normalizeClipRange(
+          rawChildStart,
+          rawChildEnd,
+          sourceDurationMs,
         );
-        const childEnd = Math.min(
-          endMs,
-          Math.round(Number(child.endMs ?? endMs)),
-        );
+        const childStart = normalizedRange.startMs;
+        const childEnd = normalizedRange.endMs;
         validateClipBounds(childStart, childEnd, source.duration_ms);
         const subtopicId = id();
+        const childExcerpt = transcriptExcerpt(
+          transcriptSegments,
+          childStart,
+          childEnd,
+        );
+        const childTitle =
+          readableAnalysisText(child.title) ||
+          readableAnalysisText(child.summary) ||
+          childExcerpt ||
+          topicTitle;
+        const childSummary =
+          readableAnalysisText(child.summary) || childExcerpt || null;
         insertSubtopic.run(
           subtopicId,
           topicId,
           childIndex,
-          String(child.title ?? `Clip ${childIndex + 1}`).slice(0, 200),
-          String(child.summary ?? "").slice(0, 1000) || null,
+          childTitle,
+          childSummary,
           childStart,
           childEnd,
           Number.isFinite(Number(child.confidence))
@@ -912,7 +1042,7 @@ async function runJob(
         {
           schemaName: "video_topic_tree",
           system:
-            "Return JSON only. Identify semantic main topics and clip-worthy subtopics from timestamped spoken transcript. Each topic and subtopic must have integer startMs and endMs inside the source duration. Do not invent unsupported claims.",
+            "Return JSON matching the requested schema. Identify semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Use coherent passages of roughly 15 to 90 seconds for clips, never isolated sentences or 1 to 4 second fragments. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1 or Clip 1. Do not invent unsupported claims.",
           user: `Source duration: ${source.duration_ms}ms\nTranscript:\n${prompt}`,
         },
       );

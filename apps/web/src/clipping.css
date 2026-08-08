@@ -170,6 +170,32 @@
   color: var(--muted);
   font-size: 11px;
 }
+.clipping-preview-backdrop {
+  z-index: 40;
+}
+.clipping-preview-modal {
+  width: min(760px, 100%);
+}
+.clipping-preview-modal h2 {
+  margin-top: 6px;
+  font-size: 18px;
+}
+.clipping-preview-video {
+  display: block;
+  width: 100%;
+  max-height: 68vh;
+  border-radius: 12px;
+  background: #111;
+}
+.clipping-preview-meta {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+.clipping-preview-meta span {
+  color: var(--muted);
+  font-size: 11px;
+}
 .selection-state {
   font-size: 10px;
   text-transform: capitalize;
