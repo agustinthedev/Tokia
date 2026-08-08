@@ -216,9 +216,9 @@ El resultado queda en `apps/extension/dist`.
 2. Activar `Developer mode`.
 3. Elegir `Load unpacked`.
 4. Seleccionar `apps/extension/dist`.
-5. Copiar el ID de la extensión, por ejemplo `abcdefghijklmnop...`.
-6. En Tokia, abrir `Settings > Connection > Extension connection` y pegar ese ID.
-7. Guardar el ID. El origen CORS queda persistido en SQLite y no hace falta editar `.env` ni reiniciar el API.
+5. En Tokia, abrir `Settings > Connection > Extension connection` y pulsar `Connect extension`.
+6. Si la extensión ya estaba cargada antes de esta versión, pulsar `Reload` en `chrome://extensions` y volver a abrir Tokia.
+7. El origen CORS queda persistido en SQLite y no hace falta editar `.env` ni reiniciar el API. También queda disponible una opción manual avanzada.
 
 ### Cargar en Brave
 
@@ -226,7 +226,7 @@ El resultado queda en `apps/extension/dist`.
 2. Activar `Developer mode`.
 3. Elegir `Load unpacked`.
 4. Seleccionar la misma carpeta `apps/extension/dist`.
-5. En Tokia, abrir `Settings > Connection > Extension connection` y guardar el ID de Brave si difiere del de Chrome.
+5. En Tokia, abrir `Settings > Connection > Extension connection` y pulsar `Connect extension`.
 
 En el popup `Open settings` permite configurar:
 

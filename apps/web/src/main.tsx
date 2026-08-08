@@ -11,6 +11,7 @@ type AnyRecord = Record<string, any>;
 type PageKey = "home" | "collections" | "assets" | "projects" | "imports" | "settings";
 type SettingsTab =
   | "connection"
+  | "api"
   | "preview"
   | "assets"
   | "imports"
@@ -325,7 +326,7 @@ function settingsTabFromUrl(): SettingsTab {
   const tab = new URLSearchParams(window.location.search).get("tab");
   if (window.location.pathname === "/assets") return "assets";
   if (window.location.pathname === "/imports") return "imports";
-  return tab === "preview" || tab === "assets" || tab === "imports" || tab === "ai-providers"
+  return tab === "api" || tab === "preview" || tab === "assets" || tab === "imports" || tab === "ai-providers"
     ? tab
     : "connection";
 }
@@ -1624,6 +1625,41 @@ function ImportDialog({ run, onClose }: { run: ImportRun; onClose: () => void })
   );
 }
 
+const extensionIdPattern = /^[a-p]{32}$/i;
+
+function extensionIdFromMessage(event: MessageEvent): string | null {
+  if (event.source !== window || event.origin !== window.location.origin) return null;
+  const data = event.data as { source?: string; type?: string; extensionId?: unknown } | undefined;
+  if (data?.source !== "tokia-browser-extension" || data.type !== "EXTENSION_ID") return null;
+  if (typeof data.extensionId !== "string" || !extensionIdPattern.test(data.extensionId)) return null;
+  return data.extensionId.toLowerCase();
+}
+
+function requestExtensionId(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let timeout = 0;
+    const cleanup = (): void => {
+      window.removeEventListener("message", onMessage);
+      window.clearTimeout(timeout);
+    };
+    const onMessage = (event: MessageEvent): void => {
+      const extensionId = extensionIdFromMessage(event);
+      if (!extensionId) return;
+      cleanup();
+      resolve(extensionId);
+    };
+    window.addEventListener("message", onMessage);
+    timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Tokia could not detect the extension. Load or reload it, then try again."));
+    }, 1800);
+    window.postMessage(
+      { source: "tokia-web-app", type: "REQUEST_EXTENSION_ID" },
+      window.location.origin,
+    );
+  });
+}
+
 function BrowserExtensionSettings({
   initialId,
   onSaved,
@@ -1632,11 +1668,50 @@ function BrowserExtensionSettings({
   onSaved: (value: AnyRecord) => void;
 }): ReactElement {
   const [extensionId, setExtensionId] = useState(initialId ?? "");
+  const [detectedExtensionId, setDetectedExtensionId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   useEffect(() => setExtensionId(initialId ?? ""), [initialId]);
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent): void => {
+      const detected = extensionIdFromMessage(event);
+      if (detected) setDetectedExtensionId(detected);
+    };
+    window.addEventListener("message", handleMessage);
+    window.postMessage(
+      { source: "tokia-web-app", type: "REQUEST_EXTENSION_ID" },
+      window.location.origin,
+    );
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  const saveExtensionId = async (value: string, message: string): Promise<void> => {
+    const saved = await request<AnyRecord>("/api/settings/browser-extension", {
+      method: "PATCH",
+      body: JSON.stringify({ extensionId: value }),
+    });
+    onSaved(saved);
+    setExtensionId(saved.browserExtensionId ?? "");
+    setNotice(message);
+  };
+
+  const connect = async (): Promise<void> => {
+    setConnecting(true);
+    setError("");
+    setNotice("");
+    try {
+      const detected = detectedExtensionId ?? (await requestExtensionId());
+      setDetectedExtensionId(detected);
+      await saveExtensionId(detected, "Extension connected successfully.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not connect the extension");
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -1644,13 +1719,7 @@ function BrowserExtensionSettings({
     setError("");
     setNotice("");
     try {
-      const saved = await request<AnyRecord>("/api/settings/browser-extension", {
-        method: "PATCH",
-        body: JSON.stringify({ extensionId: extensionId.trim() }),
-      });
-      onSaved(saved);
-      setExtensionId(saved.browserExtensionId ?? "");
-      setNotice(saved.browserExtensionId ? "Extension origin saved." : "Extension origin cleared.");
+      await saveExtensionId(extensionId.trim(), extensionId.trim() ? "Extension origin saved." : "Extension origin cleared.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the extension ID");
     } finally {
@@ -1659,40 +1728,52 @@ function BrowserExtensionSettings({
   };
 
   return (
-    <section className="panel settings-section">
+    <section className="panel settings-section extension-settings-panel">
       <div className="panel-heading">
         <div>
           <div className="eyebrow">Browser extension</div>
           <h2>Extension connection</h2>
         </div>
         <span className={`setting-value ${extensionId ? "online" : ""}`}>
-          {extensionId ? "Configured" : "Not configured"}
+          {extensionId ? "Connected" : "Not connected"}
         </span>
       </div>
       <p className="settings-help">
-        Copy the ID from <code>chrome://extensions</code> or <code>brave://extensions</code>. This allows the browser extension to call this local API without editing <code>.env</code>.
+        Connect the extension after loading it in your browser. Tokia will read its browser-generated ID automatically; the backend URL and local integration token remain in the extension settings.
       </p>
-      <form onSubmit={submit}>
-        <label className="form-field">
-          <span>Browser extension ID</span>
-          <input
-            value={extensionId}
-            onChange={(event) => setExtensionId(event.target.value)}
-            placeholder="32 lowercase letters from a to p"
-            maxLength={80}
-            spellCheck={false}
-            autoComplete="off"
-          />
-          <small>The extension still needs the backend URL and local integration token in its own Open settings page.</small>
-        </label>
-        {error && <div className="inline-error">{error}</div>}
-        {notice && <div className="inline-note">{notice}</div>}
-        <div className="detail-actions">
-          <Button variant="primary" type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Save extension ID"}
-          </Button>
+      <div className="extension-connect-card">
+        <div>
+          <strong>{detectedExtensionId ? "Extension detected" : "Ready to connect"}</strong>
+          <span>{detectedExtensionId ? "The installed Tokia extension is available on this page." : "The extension must be loaded in Chrome or Brave first."}</span>
         </div>
-      </form>
+        <Button variant="primary" onClick={() => void connect()} disabled={connecting || saving}>
+          {connecting ? "Connecting…" : "Connect extension"}
+        </Button>
+      </div>
+      {error && <div className="inline-error">{error}</div>}
+      {notice && <div className="inline-note">{notice}</div>}
+      <details className="extension-manual-settings">
+        <summary>Advanced: enter extension ID manually</summary>
+        <form onSubmit={submit}>
+          <label className="form-field">
+            <span>Browser extension ID</span>
+            <input
+              value={extensionId}
+              onChange={(event) => setExtensionId(event.target.value)}
+              placeholder="32 lowercase letters from a to p"
+              maxLength={80}
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </label>
+          <small>The ID is only used to allow the extension origin through local CORS.</small>
+          <div className="detail-actions">
+            <Button type="submit" disabled={saving || connecting}>
+              {saving ? "Saving…" : "Save manually"}
+            </Button>
+          </div>
+        </form>
+      </details>
     </section>
   );
 }
@@ -1714,6 +1795,7 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
         {(
           [
             ["connection", "Connection", "settings"],
+            ["api", "API", "arrow"],
             ["preview", "Preview", "image"],
             ["ai-providers", "AI Providers", "settings"],
             ["assets", "Assets", "assets"],
@@ -1767,22 +1849,25 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
               )}
             </section>
           </div>
-          <section className="panel setup-panel">
-            <div className="setup-mark">↗</div>
-            <div>
-              <div className="eyebrow">Browser extension</div>
-              <h2>Keep importing from Pinterest</h2>
-              <p>Configure the Tokia extension with the backend URL above and the same local integration token. Imports remain in SQLite and are available to every project.</p>
-              <Button onClick={() => window.open(`${API_BASE}/docs`, "_blank", "noopener,noreferrer")}>
-                Open API docs <Icon name="arrow" />
-              </Button>
-            </div>
-          </section>
           <BrowserExtensionSettings
             initialId={data?.browserExtensionId}
             onSaved={() => setSettingsRefresh((value) => value + 1)}
           />
         </>
+      )}
+      {tab === "api" && (
+        <section className="panel settings-section api-docs-panel">
+          <div className="panel-heading">
+            <div>
+              <div className="eyebrow">Developer tools</div>
+              <h2>API documentation</h2>
+            </div>
+          </div>
+          <p className="settings-help">Reference documentation for advanced local integrations and diagnostics. Most users will not need this section.</p>
+          <Button onClick={() => window.open(`${API_BASE}/docs`, "_blank", "noopener,noreferrer")}>
+            Open API docs <Icon name="arrow" />
+          </Button>
+        </section>
       )}
       {tab === "preview" && (
         <section className="panel settings-section">

@@ -9,6 +9,7 @@ fs.mkdirSync(out, { recursive: true });
 
 await Promise.all([
   build({ entryPoints: [path.join(root, 'src/content.ts')], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(out, 'content.js'), sourcemap: true }),
+  build({ entryPoints: [path.join(root, 'src/app-bridge.ts')], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(out, 'app-bridge.js'), sourcemap: true }),
   build({ entryPoints: [path.join(root, 'src/popup.ts')], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(out, 'popup.js'), sourcemap: true }),
   build({ entryPoints: [path.join(root, 'src/options.ts')], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(out, 'options.js'), sourcemap: true })
 ]);
