@@ -1777,6 +1777,8 @@ function BrowserExtensionSettings({
     }
   };
 
+  const isConnected = detectionState === "detected" && Boolean(detectedExtensionId && detectedExtensionId === extensionId);
+
   return (
     <section className="panel settings-section extension-settings-panel">
       <div className="panel-heading">
@@ -1784,7 +1786,8 @@ function BrowserExtensionSettings({
           <div className="eyebrow">Browser extension</div>
           <h2>Extension connection</h2>
         </div>
-        <span className={`setting-value ${extensionId ? "online" : ""}`}>
+        <span className={`setting-value ${isConnected ? "online" : ""}`}>
+          {isConnected && <span className="online-dot" />}
           {detectionState === "checking"
             ? "Checking…"
             : detectedExtensionId
@@ -1802,7 +1805,7 @@ function BrowserExtensionSettings({
           <strong>Local integration token</strong>
           <span>Managed automatically by Tokia for local API access.</span>
         </div>
-        <div className="detail-actions">
+        <div className="detail-actions extension-row-actions">
           <span className="setting-value online">Configured</span>
           <Button onClick={() => void rotateIntegrationToken()} disabled={rotatingToken || connecting || saving}>
             {rotatingToken ? "Generatingâ€¦" : "Generate new token"}
@@ -1810,33 +1813,43 @@ function BrowserExtensionSettings({
         </div>
       </div>
       {detectionState === "checking" && (
-        <div className="extension-connect-card">
+        <div className="setting-row extension-status-row">
           <div>
             <strong>Checking for the Tokia extension…</strong>
             <span>Waiting for the installed extension to respond.</span>
           </div>
+          <span className="setting-value">Checking</span>
         </div>
       )}
       {detectionState === "missing" && (
-        <div className="extension-detection-alert">
+        <div className="setting-row extension-status-row">
           <div>
             <strong>Tokia extension not detected</strong>
             <span>Reload the extension in the browser extensions page, then reload Tokia and try again.</span>
           </div>
-          <Button onClick={() => setDetectionAttempt((value) => value + 1)} disabled={connecting || saving}>
-            Retry detection
-          </Button>
+          <div className="detail-actions extension-row-actions">
+            <span className="setting-value">Not detected</span>
+            <Button onClick={() => setDetectionAttempt((value) => value + 1)} disabled={connecting || saving}>
+              Retry detection
+            </Button>
+          </div>
         </div>
       )}
       {detectionState === "detected" && (
-        <div className="extension-connect-card">
+        <div className="setting-row extension-status-row">
           <div>
             <strong>Extension detected</strong>
             <span>The installed Tokia extension is available on this page.</span>
           </div>
-          <Button variant="primary" onClick={() => void connect()} disabled={connecting || saving}>
-            {connecting ? "Connecting…" : "Connect extension"}
-          </Button>
+          <div className="detail-actions extension-row-actions">
+            <span className={`setting-value ${isConnected ? "online" : ""}`}>
+              {isConnected && <span className="online-dot" />}
+              {isConnected ? "Connected" : "Detected"}
+            </span>
+            <Button variant="primary" onClick={() => void connect()} disabled={connecting || saving}>
+              {connecting ? "Connecting…" : "Connect extension"}
+            </Button>
+          </div>
         </div>
       )}
       {error && <div className="inline-error">{error}</div>}
