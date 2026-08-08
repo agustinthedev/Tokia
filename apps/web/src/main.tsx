@@ -437,7 +437,8 @@ function StatusBadge({ value }: { value: string }): ReactElement {
 
 function MediaPreview({ asset, detail = false, onImageLoad }: { asset: Asset; detail?: boolean; onImageLoad?: (size: { width: number; height: number }) => void }): ReactElement {
   const [sourceIndex, setSourceIndex] = useState(0);
-  const imageSources = Array.from(new Set((asset.mediaType === "video" ? [asset.remotePreviewUrl, asset.previewUrl, asset.thumbnailUrl, asset.remoteImageUrl] : [asset.remoteImageUrl, asset.mediaUrl, asset.previewUrl, asset.remotePreviewUrl, asset.thumbnailUrl]).filter((value): value is string => Boolean(value))));
+  useEffect(() => setSourceIndex(0), [asset.id]);
+  const imageSources = Array.from(new Set((asset.mediaType === "video" ? [asset.remotePreviewUrl, asset.previewUrl, asset.thumbnailUrl, asset.remoteImageUrl, asset.imageUrl] : [asset.remoteImageUrl, asset.mediaUrl, asset.previewUrl, asset.remotePreviewUrl, asset.thumbnailUrl, asset.imageUrl]).filter((value): value is string => Boolean(value))));
   const image = imageSources[sourceIndex];
   const videoSource = asset.mediaType === "video" && asset.mediaUrl ? asset.mediaUrl : undefined;
   const handleImageError = (): void => setSourceIndex((current) => current + 1);
@@ -2798,7 +2799,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               <div className="frame-selection-group" key={frame.id}>
                 <div className="frame-selection-row" draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", frame.id)}>
                 <span className="frame-number">{frame.position}</span>
-                <div className="frame-selection-preview">{(frame.sourceMedia?.imageUrl ?? frame.sourceMedia?.previewUrl) ? <img src={frame.sourceMedia.imageUrl ?? frame.sourceMedia.previewUrl} alt="" /> : <span>?</span>}</div>
+                <div className="frame-selection-preview">{frame.sourceMedia ? <MediaPreview asset={frame.sourceMedia} /> : <span>?</span>}</div>
                 <div>
                   <strong>{frame.role}{frame.sourceMedia ? ` (${frame.sourceMedia.mediaType === "video" || frame.sourceMedia.mediaType === "animated" ? "video" : "image"})` : ""}</strong>
                   <span>
@@ -2889,7 +2890,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                               aria-label={`Preview ${asset.title ?? asset.externalId ?? "content"}`}
                               title="Preview content"
                             >
-                              {asset.thumbnailUrl ?? asset.previewUrl ?? asset.mediaUrl ? <img src={asset.thumbnailUrl ?? asset.previewUrl ?? asset.mediaUrl} alt="" /> : "?"}
+                              <MediaPreview asset={asset} />
                             </button>
                             <button type="button" className="frame-source-option-details" onClick={() => void chooseSourceForFrame(frame, asset)}>
                               <strong>{asset.title ?? asset.externalId ?? "Untitled asset"}</strong>

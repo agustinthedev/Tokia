@@ -147,7 +147,11 @@ h3 { font-size: 16px; letter-spacing: -.02em; }
 .frame-source-option { display: flex; align-items: center; gap: 9px; width: 100%; border: 1px solid var(--border); border-radius: 9px; padding: 7px; background: var(--bg-soft); color: var(--text); text-align: left; }
 .frame-source-option:hover, .frame-source-option.selected { border-color: rgba(185,243,107,.55); background: rgba(185,243,107,.08); }
 .frame-source-option-thumb { width: 36px; height: 42px; display: grid; place-items: center; flex-shrink: 0; overflow: hidden; border: 0; border-radius: 6px; padding: 0; background: var(--surface); color: var(--muted-2); cursor: zoom-in; }
-.frame-source-option-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.frame-source-option-thumb .media-preview { width: 36px; height: 42px; min-height: 42px; }
+.frame-source-option-thumb .media-preview img { width: 100%; height: 100%; min-height: 42px; object-fit: cover; }
+.frame-source-option-thumb .media-fallback { min-height: 42px; gap: 2px; font-size: 8px; }
+.frame-source-option-thumb .media-fallback .icon { font-size: 16px; }
+.frame-source-option-thumb .play-badge, .frame-source-option-thumb .duration-badge { display: none; }
 .frame-source-option-details { min-width: 0; display: grid; flex: 1; gap: 3px; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .frame-source-option strong, .frame-source-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .frame-source-option strong { font-size: 11px; }
