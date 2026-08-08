@@ -5,6 +5,7 @@ import { bindPreviewGallery } from "./preview-gallery";
 import "./styles.css";
 import { AiProvidersPage } from "./AiProvidersPage";
 import { ClippingWizard } from "./ClippingWizard";
+import { API_BASE, apiRequest, getIntegrationToken, setIntegrationToken } from "./api-client";
 import "./clipping.css";
 
 type AnyRecord = Record<string, any>;
@@ -202,24 +203,18 @@ interface SearchResult {
   projects: Project[];
 }
 
-const API_BASE = (import.meta.env.VITE_API_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
-const API_TOKEN = import.meta.env.VITE_INTEGRATION_TOKEN ?? "tokia-local-dev-token";
-
 if (typeof document !== "undefined") bindPreviewGallery(document);
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = path === "/api/assets?mediaType=image&pageSize=100" ? "/api/assets?mediaType=source&pageSize=100" : path;
   const hasBody = init?.body !== undefined && init?.body !== null;
-  const response = await fetch(`${API_BASE}${apiPath}`, {
+  const body = await apiRequest<T>(apiPath, {
     ...init,
     headers: {
       ...(hasBody ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
-      ...(init?.method && init.method !== "GET" ? { "X-Local-Integration-Token": API_TOKEN } : {}),
     },
   });
-  const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.error?.message ?? `Request failed (${response.status})`);
   return normalizeAssetTitles(body) as T;
 }
 
@@ -1647,7 +1642,7 @@ function extensionConfigurationFromMessage(event: MessageEvent): { extensionId: 
   };
 }
 
-function configureExtension(extensionId: string, backendUrl: string): Promise<void> {
+function configureExtension(extensionId: string, backendUrl: string, integrationToken: string): Promise<void> {
   return new Promise((resolve, reject) => {
     let timeout = 0;
     const cleanup = (): void => {
@@ -1667,7 +1662,7 @@ function configureExtension(extensionId: string, backendUrl: string): Promise<vo
       reject(new Error("The extension was detected, but it did not confirm its settings update."));
     }, 1800);
     window.postMessage(
-      { source: "tokia-web-app", type: "CONFIGURE_EXTENSION", extensionId, backendUrl },
+      { source: "tokia-web-app", type: "CONFIGURE_EXTENSION", extensionId, backendUrl, integrationToken },
       window.location.origin,
     );
   });
@@ -1688,6 +1683,7 @@ function BrowserExtensionSettings({
   const [detectionAttempt, setDetectionAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [rotatingToken, setRotatingToken] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -1737,7 +1733,8 @@ function BrowserExtensionSettings({
       const detected = detectedExtensionId;
       if (!detected) throw new Error("The extension is not detected on this page.");
       setDetectedExtensionId(detected);
-      await configureExtension(detected, backendUrl);
+      const integrationToken = await getIntegrationToken();
+      await configureExtension(detected, backendUrl, integrationToken);
       await saveExtensionId(detected);
       setNotice("Extension connected and backend URL configured successfully.");
     } catch (caught) {
@@ -1762,6 +1759,24 @@ function BrowserExtensionSettings({
     }
   };
 
+  const rotateIntegrationToken = async (): Promise<void> => {
+    setRotatingToken(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await request<{ integrationToken?: string }>("/api/settings/integration-token", {
+        method: "POST",
+      });
+      if (!result.integrationToken) throw new Error("The new integration token was not returned.");
+      setIntegrationToken(result.integrationToken);
+      setNotice("A new local integration token was generated. Connect the extension again to apply it.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not generate a new integration token");
+    } finally {
+      setRotatingToken(false);
+    }
+  };
+
   return (
     <section className="panel settings-section extension-settings-panel">
       <div className="panel-heading">
@@ -1780,8 +1795,20 @@ function BrowserExtensionSettings({
         </span>
       </div>
       <p className="settings-help">
-        Connect the extension after loading it in your browser. Tokia will read its browser-generated ID and save the backend URL automatically; the local integration token remains in the extension settings.
+        Connect the extension after loading it in your browser. Tokia will read its browser-generated ID and save the backend URL and local integration token automatically.
       </p>
+      <div className="setting-row extension-token-row">
+        <div>
+          <strong>Local integration token</strong>
+          <span>Managed automatically by Tokia for local API access.</span>
+        </div>
+        <div className="detail-actions">
+          <span className="setting-value online">Configured</span>
+          <Button onClick={() => void rotateIntegrationToken()} disabled={rotatingToken || connecting || saving}>
+            {rotatingToken ? "Generatingâ€¦" : "Generate new token"}
+          </Button>
+        </div>
+      </div>
       {detectionState === "checking" && (
         <div className="extension-connect-card">
           <div>

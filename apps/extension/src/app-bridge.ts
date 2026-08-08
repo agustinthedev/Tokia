@@ -20,14 +20,20 @@ function normalizeBackendUrl(value: unknown): string | null {
   }
 }
 
-async function configureBackend(value: unknown): Promise<void> {
-  const backendUrl = normalizeBackendUrl(value);
-  if (!backendUrl) {
-    postMessage({ type: 'EXTENSION_CONFIGURED', extensionId: chrome.runtime.id, ok: false, error: 'The backend URL is invalid.' });
+function normalizeIntegrationToken(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return value.trim().slice(0, 200);
+}
+
+async function configureBackend(backendValue: unknown, tokenValue: unknown): Promise<void> {
+  const backendUrl = normalizeBackendUrl(backendValue);
+  const token = normalizeIntegrationToken(tokenValue);
+  if (!backendUrl || !token) {
+    postMessage({ type: 'EXTENSION_CONFIGURED', extensionId: chrome.runtime.id, ok: false, error: 'The backend URL or integration token is invalid.' });
     return;
   }
   try {
-    await chrome.storage.local.set({ backendUrl });
+    await chrome.storage.local.set({ backendUrl, token });
     postMessage({ type: 'EXTENSION_CONFIGURED', extensionId: chrome.runtime.id, ok: true, backendUrl });
   } catch {
     postMessage({ type: 'EXTENSION_CONFIGURED', extensionId: chrome.runtime.id, ok: false, error: 'The extension settings could not be saved.' });
@@ -36,10 +42,10 @@ async function configureBackend(value: unknown): Promise<void> {
 
 window.addEventListener('message', (event) => {
   if (event.source !== window || event.origin !== window.location.origin) return;
-  const data = event.data as { source?: string; type?: string; backendUrl?: unknown } | undefined;
+  const data = event.data as { source?: string; type?: string; backendUrl?: unknown; integrationToken?: unknown } | undefined;
   if (data?.source !== webMessageSource) return;
   if (data.type === 'REQUEST_EXTENSION_ID') announceExtensionId();
-  if (data.type === 'CONFIGURE_EXTENSION') void configureBackend(data.backendUrl);
+  if (data.type === 'CONFIGURE_EXTENSION') void configureBackend(data.backendUrl, data.integrationToken);
 });
 
 announceExtensionId();

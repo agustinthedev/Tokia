@@ -1,11 +1,7 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { apiRequest } from "./api-client";
 
 type AnyRecord = Record<string, any>;
-const API_BASE = (
-  import.meta.env.VITE_API_URL ?? "http://127.0.0.1:3000"
-).replace(/\/$/, "");
-const API_TOKEN =
-  import.meta.env.VITE_INTEGRATION_TOKEN ?? "tokia-local-dev-token";
 
 function preflightMessage(preflight: AnyRecord): string {
   const blocked: string[] = [];
@@ -30,17 +26,8 @@ function preflightMessage(preflight: AnyRecord): string {
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (init?.method && init.method !== "GET") {
-    headers.set("X-Local-Integration-Token", API_TOKEN);
-    headers.set("Content-Type", "application/json");
-  }
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  const body = await response.json().catch(() => null);
-  if (!response.ok)
-    throw new Error(
-      body?.error?.message ?? `Request failed (${response.status})`,
-    );
-  return body as T;
+  if (init?.method && init.method !== "GET") headers.set("Content-Type", "application/json");
+  return apiRequest<T>(path, { ...init, headers });
 }
 function Button({
   children,

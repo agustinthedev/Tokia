@@ -6,6 +6,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { API_BASE, apiRequest } from "./api-client";
 import "./clipping.css";
 
 type AnyRecord = Record<string, any>;
@@ -20,11 +21,6 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
 }
-const API_BASE = (
-  import.meta.env.VITE_API_URL ?? "http://127.0.0.1:3000"
-).replace(/\/$/, "");
-const API_TOKEN =
-  import.meta.env.VITE_INTEGRATION_TOKEN ?? "tokia-local-dev-token";
 const defaultSettings = {
   subtitles: true,
   subtitlePreset: "highlight",
@@ -44,21 +40,13 @@ const defaultSettings = {
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (init?.method && init.method !== "GET")
-    headers.set("X-Local-Integration-Token", API_TOKEN);
   if (
     init?.body &&
     !(init.body instanceof Blob) &&
     !(init.body instanceof FormData)
   )
     headers.set("Content-Type", "application/json");
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  const body = await response.json().catch(() => null);
-  if (!response.ok)
-    throw new Error(
-      body?.error?.message ?? `Request failed (${response.status})`,
-    );
-  return body as T;
+  return apiRequest<T>(path, { ...init, headers });
 }
 
 function ms(value: number | undefined): string {
