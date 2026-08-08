@@ -72,7 +72,7 @@ export function AiProvidersPage(): ReactElement {
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
   const [modelName, setModelName] = useState("gpt-4o-mini");
   const [transcriptionModel, setTranscriptionModel] = useState(
-    "gpt-4o-mini-transcribe",
+    "whisper-1",
   );
   const [apiKey, setApiKey] = useState("");
   const [localModelPath, setLocalModelPath] = useState("");
@@ -229,7 +229,7 @@ export function AiProvidersPage(): ReactElement {
                 if (value === "openai") {
                   setBaseUrl("https://api.openai.com/v1");
                   setModelName("gpt-4o-mini");
-                  setTranscriptionModel("gpt-4o-mini-transcribe");
+                  setTranscriptionModel("whisper-1");
                 }
               }}
             >
@@ -292,6 +292,10 @@ export function AiProvidersPage(): ReactElement {
                       setTranscriptionModel(event.target.value)
                     }
                   />
+                  <small>
+                    Clipping needs timestamped segments; use{" "}
+                    <code>whisper-1</code> with OpenAI.
+                  </small>
                 </label>
               </div>
               <label className="toggle-row">

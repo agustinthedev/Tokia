@@ -12,6 +12,7 @@ import {
   structuredAnalysis,
   touchRequest,
   transcribe,
+  transcriptionModelForClipping,
 } from "./ai-providers.js";
 import {
   fileMetadata,
@@ -859,7 +860,7 @@ async function runJob(
       const meta = await fileMetadata(audioPath);
       await persistTranscript(db, source, provider, result, meta.sha256);
       touchRequest(db, provider.id, "TRANSCRIPTION", "completed", {
-        modelName: provider.transcription_model,
+        modelName: transcriptionModelForClipping(provider),
         audioDurationMs: source.duration_ms,
         latencyMs: Date.now() - started,
       });

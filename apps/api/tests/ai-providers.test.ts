@@ -7,6 +7,7 @@ import {
   insertProvider,
   normalizeProviderError,
   providerSafe,
+  transcriptionModelForClipping,
 } from "../src/ai-providers.js";
 
 describe("AI provider security and capability model", () => {
@@ -74,5 +75,20 @@ describe("AI provider security and capability model", () => {
       message:
         "The provider rejected the request: The selected transcription model is unavailable.",
     });
+  });
+
+  it("uses the timestamp-compatible OpenAI transcription model for clipping", () => {
+    expect(
+      transcriptionModelForClipping({
+        provider_type: "openai",
+        transcription_model: "gpt-4o-mini-transcribe",
+      }),
+    ).toBe("whisper-1");
+    expect(
+      transcriptionModelForClipping({
+        provider_type: "openai_compatible",
+        transcription_model: "custom-transcribe",
+      }),
+    ).toBe("custom-transcribe");
   });
 });

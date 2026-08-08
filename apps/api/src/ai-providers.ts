@@ -308,7 +308,7 @@ export function providerInput(
       String(
         input.transcriptionModel ??
           existing?.transcription_model ??
-          (providerType === "openai" ? "gpt-4o-mini-transcribe" : ""),
+          (providerType === "openai" ? "whisper-1" : ""),
       )
         .trim()
         .slice(0, 160) || null,
@@ -367,6 +367,13 @@ export function providerCapabilities(row: Row): ProviderCapabilities {
 export function capabilityForTask(task: AiTask): keyof ProviderCapabilities {
   if (task === "TRANSCRIPTION") return "audioTranscription";
   return "textGeneration";
+}
+
+export function transcriptionModelForClipping(row: Row): string {
+  const configured = String(row.transcription_model ?? "").trim();
+  if (row.provider_type === "openai" && configured !== "whisper-1")
+    return "whisper-1";
+  return configured || "whisper-1";
 }
 
 export function hasRequiredCapability(row: Row, task: AiTask): boolean {
@@ -585,7 +592,7 @@ export async function transcribe(
     new Blob([audio as unknown as BlobPart]),
     path.basename(audioPath),
   );
-  form.append("model", String(row.transcription_model ?? "whisper-1"));
+  form.append("model", transcriptionModelForClipping(row));
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "segment");
   if (caps.wordTimestamps) form.append("timestamp_granularities[]", "word");
