@@ -1,8 +1,6 @@
-export const API_BASE = (
-  import.meta.env.VITE_API_URL ?? "http://127.0.0.1:3000"
-).replace(/\/$/, "");
+export const API_BASE = "http://127.0.0.1:3000";
 
-let integrationToken = import.meta.env.VITE_INTEGRATION_TOKEN?.trim() ?? "";
+let integrationToken = "";
 let integrationTokenRequest: Promise<string> | null = null;
 
 async function loadIntegrationToken(): Promise<string> {

@@ -16,7 +16,13 @@ import {
   isPlayableVideoUrl,
   promoteToLargestPinterestImage,
 } from "@tokia/shared";
-import { config as defaultConfig } from "./config.js";
+import {
+  config as defaultConfig,
+  defaultRuntimeSettings,
+  saveRuntimeSettings,
+  type RuntimeLogLevel,
+  type RuntimeSettings,
+} from "./config.js";
 import { createDatabase } from "./db.js";
 import {
   getCollection,
@@ -79,6 +85,7 @@ type QueryRecord = Record<string, string | undefined>;
 type Row = Record<string, any>;
 const BROWSER_EXTENSION_SETTING_KEY = "browser_extension_id";
 const LOCAL_INTEGRATION_TOKEN_SETTING_KEY = "local_integration_token";
+const RUNTIME_LOG_LEVELS: RuntimeLogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal", "silent"];
 
 function positiveInt(
   value: string | undefined,
@@ -142,6 +149,68 @@ function ensureLocalIntegrationToken(db: Database.Database, fallback: string): s
   if (stored) return stored;
   saveApplicationSetting(db, LOCAL_INTEGRATION_TOKEN_SETTING_KEY, fallback);
   return fallback;
+}
+function runtimeSettingsSnapshot(settings: AppSettings): RuntimeSettings {
+  return {
+    host: settings.host,
+    port: settings.port,
+    databasePath: settings.databasePath,
+    contentStorageDirectory: settings.contentStorageDirectory,
+    ffmpegPath: settings.ffmpegPath,
+    ffprobePath: settings.ffprobePath,
+    maxUploadBytes: settings.maxUploadBytes,
+    modelProvider: settings.modelProvider,
+    modelName: settings.modelName,
+    maxPinsPerImport: settings.maxPinsPerImport,
+    maxRequestBytes: settings.maxRequestBytes,
+    corsAllowedOrigins: [...settings.corsAllowedOrigins],
+    logLevel: settings.logLevel,
+  };
+}
+function runtimeSettingsFromBody(current: RuntimeSettings, body: Row): RuntimeSettings | string {
+  const next = { ...current };
+  const textFields: Array<keyof Pick<RuntimeSettings, "host" | "databasePath" | "contentStorageDirectory" | "ffmpegPath" | "ffprobePath" | "modelProvider" | "modelName">> = [
+    "host",
+    "databasePath",
+    "contentStorageDirectory",
+    "ffmpegPath",
+    "ffprobePath",
+    "modelProvider",
+    "modelName",
+  ];
+  for (const field of textFields) {
+    if (body[field] === undefined) continue;
+    if (typeof body[field] !== "string" || !body[field].trim()) return `${field} must be a non-empty string.`;
+    next[field] = body[field].trim();
+  }
+  if (body.port !== undefined) {
+    if (!Number.isInteger(body.port) || body.port < 1 || body.port > 65_535) return "port must be an integer between 1 and 65535.";
+    next.port = body.port;
+  }
+  const boundedNumbers: Array<{ field: keyof Pick<RuntimeSettings, "maxUploadBytes" | "maxRequestBytes">; maximum?: number }> = [
+    { field: "maxUploadBytes", maximum: 4 * 1024 * 1024 * 1024 },
+    { field: "maxRequestBytes", maximum: 4 * 1024 * 1024 * 1024 },
+  ];
+  for (const { field, maximum } of boundedNumbers) {
+    if (body[field] === undefined) continue;
+    if (!Number.isInteger(body[field]) || body[field] <= 0 || (maximum && body[field] > maximum)) return `${field} must be a positive integer.`;
+    next[field] = body[field];
+  }
+  if (body.maxPinsPerImport !== undefined) {
+    if (!Number.isInteger(body.maxPinsPerImport) || body.maxPinsPerImport < 1 || body.maxPinsPerImport > 10_000) return "maxPinsPerImport must be an integer between 1 and 10000.";
+    next.maxPinsPerImport = body.maxPinsPerImport;
+  }
+  if (body.logLevel !== undefined) {
+    if (typeof body.logLevel !== "string" || !RUNTIME_LOG_LEVELS.includes(body.logLevel as RuntimeLogLevel)) return "logLevel is not supported.";
+    next.logLevel = body.logLevel as RuntimeLogLevel;
+  }
+  if (body.corsAllowedOrigins !== undefined) {
+    if (!Array.isArray(body.corsAllowedOrigins)) return "corsAllowedOrigins must be an array of origins.";
+    const origins = body.corsAllowedOrigins.filter((origin): origin is string => typeof origin === "string").map((origin) => origin.trim()).filter(Boolean);
+    if (!origins.length) return "corsAllowedOrigins must contain at least one origin.";
+    next.corsAllowedOrigins = origins;
+  }
+  return next;
 }
 function browserExtensionId(db: Database.Database, settings: AppSettings): string | null {
   const stored = applicationSetting(db, BROWSER_EXTENSION_SETTING_KEY);
@@ -647,7 +716,33 @@ export async function buildApp(
       browserExtensionId: browserExtensionId(db, settings),
       browserExtensionOrigin: browserExtensionOrigin(db, settings),
       maxPinsPerImport: settings.maxPinsPerImport,
+      advanced: runtimeSettingsSnapshot(settings),
+      advancedDefaults: defaultRuntimeSettings,
     }),
+  );
+  app.patch(
+    "/api/settings/advanced",
+    {
+      schema: {
+        tags: ["diagnostics"],
+        summary: "Save non-sensitive advanced runtime settings",
+      },
+    },
+    async (request, reply) => {
+      if (!integrationGuard(settings, request, reply)) return;
+      const next = runtimeSettingsFromBody(runtimeSettingsSnapshot(settings), bodyOf(request));
+      if (typeof next === "string") return reply.code(400).send({ error: { code: "INVALID_RUNTIME_SETTINGS", message: next } });
+      const previous = runtimeSettingsSnapshot(settings);
+      saveRuntimeSettings(next);
+      Object.assign(settings, next);
+      const changed = JSON.stringify(previous) !== JSON.stringify(next);
+      return {
+        advanced: runtimeSettingsSnapshot(settings),
+        advancedDefaults: defaultRuntimeSettings,
+        restartRequired: changed,
+        message: changed ? "Advanced settings saved. Restart the API to apply all changes." : "Advanced settings are unchanged.",
+      };
+    },
   );
   app.post(
     "/api/settings/integration-token",

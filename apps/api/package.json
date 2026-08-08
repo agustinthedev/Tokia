@@ -16,7 +16,6 @@
     "@fastify/swagger-ui": "^5.2.3",
     "@tokia/shared": "0.1.0",
     "better-sqlite3": "^12.2.0",
-    "dotenv": "^17.2.1",
     "fastify": "^5.4.0"
   },
   "devDependencies": {
