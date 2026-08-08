@@ -127,6 +127,7 @@ interface ContentFrame {
   sourceMedia?: Asset | null;
 }
 interface ContentDetail extends ContentSummary {
+  wizardStep?: number;
   configuration: AnyRecord;
   narrative?: {
     topic: string;
@@ -2250,7 +2251,15 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         setType(loaded.type);
         setConfig(loaded.configuration);
         setSelectedCollections(loaded.configuration.sourceCollectionIds ?? []);
-        setStep(loaded.status === "preview_ready" || loaded.status === "ready" ? 7 : 4);
+        const persistedStep = Number(loaded.wizardStep);
+        const fallbackStep = loaded.narrative || loaded.frames.some((frame) => frame.sourceMedia) ? 4 : 1;
+        setStep(
+          loaded.status === "preview_ready" || loaded.status === "ready"
+            ? 7
+            : Number.isInteger(persistedStep) && persistedStep >= 1 && persistedStep <= 7
+              ? persistedStep
+              : fallbackStep,
+        );
         setDirty(false);
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load the draft"));
@@ -2258,6 +2267,16 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       active = false;
     };
   }, [existingId]);
+  const persistStep = async (nextStep: number, id = content?.id): Promise<void> => {
+    const boundedStep = Math.max(1, Math.min(7, Math.round(nextStep)));
+    setStep(boundedStep);
+    if (!id) return;
+    const updated = await request<ContentDetail>(`/api/content/${id}/wizard-step`, {
+      method: "PATCH",
+      body: JSON.stringify({ step: boundedStep }),
+    });
+    setContent(updated);
+  };
   const hasActiveTextJob = content?.jobs?.some((job) => ["narrative_generation", "caption_regeneration", "frame_regeneration"].includes(job.jobType) && ["queued", "running"].includes(job.status)) ?? false;
   useEffect(() => {
     if (!content || (!hasActiveTextJob && !["preview_generating", "generation_queued", "generating"].includes(content.status))) return;
@@ -2307,7 +2326,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
     setNotice("");
     try {
       if (step === 1) {
-        setStep(2);
+        await persistStep(2);
         return;
       }
       if (step === 2) {
@@ -2315,7 +2334,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
           setError("Select at least one project source collection.");
           return;
         }
-        setStep(3);
+        await persistStep(3);
         return;
       }
       if (step === 3) {
@@ -2325,7 +2344,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         }
         const draft = await ensureDraft();
         setContent(draft);
-        setStep(4);
+        await persistStep(4, draft.id);
         return;
       }
       if (step === 4) {
@@ -2335,7 +2354,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
             sourceCollectionIds: selectedCollections,
           },
         });
-        setStep(5);
+        await persistStep(5);
         return;
       }
       if (step === 5) {
@@ -2345,12 +2364,12 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
             sourceCollectionIds: selectedCollections,
           },
         });
-        setStep(6);
+        await persistStep(6);
         return;
       }
       if (step === 6) {
         await saveTextFields();
-        setStep(7);
+        await persistStep(7);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save this step");
@@ -2602,7 +2621,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       <Modal title={existingId ? "Continue content draft" : "Create content"} onClose={close} wide>
       <div className="wizard-progress" aria-label="Content creation steps">
         {stepLabels.map((label, index) => (
-          <button type="button" key={label} className={step === index + 1 ? "active" : step > index + 1 ? "complete" : ""} onClick={() => index + 1 < step && setStep(index + 1)}>
+          <button type="button" key={label} className={step === index + 1 ? "active" : step > index + 1 ? "complete" : ""} onClick={() => index + 1 < step && void persistStep(index + 1)}>
             <span>{index + 1}</span>
             {label}
           </button>
@@ -3269,7 +3288,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       {error && <div className="inline-error">{error}</div>}
       <div className="modal-footer">
         <Button onClick={close}>Close</Button>
-        {step > 1 && <Button onClick={() => setStep((value) => value - 1)}>Back</Button>}
+        {step > 1 && <Button onClick={() => void persistStep(step - 1)}>Back</Button>}
         {step < 7 && (
           <Button variant="primary" onClick={next} disabled={saving}>
             Next
@@ -3288,7 +3307,8 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         <Button
           onClick={async () => {
             try {
-              await ensureDraft();
+              const draft = await ensureDraft();
+              await persistStep(step, draft.id);
               onClose();
             } catch (caught) {
               setError(caught instanceof Error ? caught.message : "Could not save draft");
