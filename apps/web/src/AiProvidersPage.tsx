@@ -6,6 +6,28 @@ const API_BASE = (
 ).replace(/\/$/, "");
 const API_TOKEN =
   import.meta.env.VITE_INTEGRATION_TOKEN ?? "tokia-local-dev-token";
+
+function preflightMessage(preflight: AnyRecord): string {
+  const blocked: string[] = [];
+  const transcription = preflight?.transcription;
+  const analysis = preflight?.analysis;
+  if (!transcription?.ready) {
+    blocked.push(
+      transcription?.provider
+        ? `Transcription provider “${transcription.provider.providerName}” must be connected and support timestamped segments.`
+        : "Choose and save a transcription provider.",
+    );
+  }
+  if (!analysis?.ready) {
+    blocked.push(
+      analysis?.provider
+        ? `Text analysis provider “${analysis.provider.providerName}” must be connected and support structured output or JSON mode.`
+        : "Choose and save a text analysis provider.",
+    );
+  }
+  return blocked.join(" ");
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.method && init.method !== "GET") {
@@ -57,7 +79,7 @@ export function AiProvidersPage(): ReactElement {
   const [allowLocal, setAllowLocal] = useState(false);
   const [transcriptionProviderId, setTranscriptionProviderId] = useState("");
   const [analysisProviderId, setAnalysisProviderId] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const load = async (): Promise<void> => {
@@ -75,26 +97,18 @@ export function AiProvidersPage(): ReactElement {
     void load();
   }, []);
   useEffect(() => {
-    const providers = data?.providers ?? [];
     const assignments = data?.assignments ?? [];
     setTranscriptionProviderId(
       assignments.find((item: AnyRecord) => item.taskType === "TRANSCRIPTION")
-        ?.providerId ??
-        providers.find(
-          (item: AnyRecord) => item.capabilities?.audioTranscription,
-        )?.id ??
-        "",
+        ?.providerId ?? "",
     );
     setAnalysisProviderId(
       assignments.find((item: AnyRecord) => item.taskType === "TOPIC_DETECTION")
-        ?.providerId ??
-        providers.find((item: AnyRecord) => item.capabilities?.textGeneration)
-          ?.id ??
-        "",
+        ?.providerId ?? "",
     );
   }, [data]);
   const add = async (): Promise<void> => {
-    setBusy(true);
+    setBusyAction("add");
     setError("");
     try {
       const capabilities =
@@ -138,11 +152,11 @@ export function AiProvidersPage(): ReactElement {
         caught instanceof Error ? caught.message : "Could not add provider",
       );
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const validate = async (id: string): Promise<void> => {
-    setBusy(true);
+    setBusyAction(`validate:${id}`);
     setError("");
     try {
       await api(`/api/ai/providers/${id}/validate`, {
@@ -157,11 +171,11 @@ export function AiProvidersPage(): ReactElement {
       );
       await load();
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const assign = async (): Promise<void> => {
-    setBusy(true);
+    setBusyAction("assign");
     setError("");
     try {
       await api("/api/ai/assignments", {
@@ -177,9 +191,10 @@ export function AiProvidersPage(): ReactElement {
           : "Could not save task assignments",
       );
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
+  const busy = Boolean(busyAction);
   const providers = data?.providers ?? [];
   const remote = type !== "local_whisper";
   return (
@@ -307,7 +322,7 @@ export function AiProvidersPage(): ReactElement {
             </label>
           )}
           <Button variant="primary" onClick={() => void add()} disabled={busy}>
-            {busy ? "Saving…" : "Add AI provider"}
+            {busyAction === "add" ? "Saving…" : "Add AI provider"}
           </Button>
         </section>
         <section className="panel settings-section">
@@ -365,7 +380,7 @@ export function AiProvidersPage(): ReactElement {
             assignment in this first version.
           </p>
           <Button onClick={() => void assign()} disabled={busy}>
-            Save task assignments
+            {busyAction === "assign" ? "Saving…" : "Save task assignments"}
           </Button>
           {data?.preflight && (
             <div
@@ -377,7 +392,7 @@ export function AiProvidersPage(): ReactElement {
               <p>
                 {data.preflight.ready
                   ? "Both required capabilities are connected."
-                  : "Connect and validate one provider for each required capability."}
+                  : preflightMessage(data.preflight)}
               </p>
             </div>
           )}
@@ -432,18 +447,24 @@ export function AiProvidersPage(): ReactElement {
                 </div>
                 <div className="provider-card-footer">
                   <span>
-                    {provider.hasCredential
-                      ? "Credential saved (masked)"
-                      : "No remote credential"}
+                    {provider.status === "connected"
+                      ? "Connection validated"
+                      : provider.status === "connection_failed"
+                        ? `Last validation failed${provider.lastErrorMessage ? `: ${provider.lastErrorMessage}` : ""}`
+                        : provider.hasCredential
+                          ? "Credential saved (masked)"
+                          : "No remote credential"}
                     {provider.lastValidatedAt
-                      ? ` · validated ${new Date(provider.lastValidatedAt).toLocaleString()}`
+                      ? ` · ${provider.status === "connected" ? "validated" : "checked"} ${new Date(provider.lastValidatedAt).toLocaleString()}`
                       : ""}
                   </span>
                   <Button
                     onClick={() => void validate(provider.id)}
                     disabled={busy || provider.providerType === "local_whisper"}
                   >
-                    Test connection
+                    {busyAction === `validate:${provider.id}`
+                      ? "Testing…"
+                      : "Test connection"}
                   </Button>
                   <Button
                     variant="danger"
