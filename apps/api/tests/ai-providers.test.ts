@@ -5,6 +5,7 @@ import {
   encryptSecret,
   hasRequiredCapability,
   insertProvider,
+  normalizeProviderError,
   providerSafe,
 } from "../src/ai-providers.js";
 
@@ -49,5 +50,15 @@ describe("AI provider security and capability model", () => {
       hasRequiredCapability({ ...row, status: "connected" }, "TOPIC_DETECTION"),
     ).toBe(true);
     db.close();
+  });
+
+  it("normalizes aborted provider requests as timeouts", () => {
+    const aborted = Object.assign(new Error("This operation was aborted"), {
+      code: 20,
+    });
+    expect(normalizeProviderError(aborted)).toMatchObject({
+      code: "TIMEOUT",
+      message: "The provider request timed out. Try again in a moment.",
+    });
   });
 });

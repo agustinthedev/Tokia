@@ -13,6 +13,7 @@ export type ProviderErrorCode =
   | "UNSUPPORTED_CAPABILITY"
   | "QUOTA_OR_BILLING_ERROR"
   | "RATE_LIMITED"
+  | "TIMEOUT"
   | "NETWORK_ERROR"
   | "PROVIDER_UNAVAILABLE"
   | "INVALID_BASE_URL"
@@ -388,7 +389,8 @@ export function normalizeProviderError(
   error: unknown,
   responseStatus?: number,
 ): ProviderError {
-  if ((error as ProviderError)?.code) return error as ProviderError;
+  const errorCode = (error as ProviderError | undefined)?.code;
+  if (typeof errorCode === "string") return error as ProviderError;
   if (responseStatus === 401 || responseStatus === 403)
     return providerError(
       responseStatus === 401
@@ -410,6 +412,11 @@ export function normalizeProviderError(
     return providerError(
       "PROVIDER_UNAVAILABLE",
       "The provider is temporarily unavailable.",
+    );
+  if (error instanceof Error && /abort|timeout/i.test(error.message))
+    return providerError(
+      "TIMEOUT",
+      "The provider request timed out. Try again in a moment.",
     );
   if (
     error instanceof TypeError ||
@@ -485,7 +492,7 @@ export async function validateProvider(
         "Local Whisper is configured, but this deployment does not bundle a supported runtime adapter.",
       );
     }
-    await providerFetch(row, masterSecret, "/models", { method: "GET" }, 15_000);
+    await providerFetch(row, masterSecret, "/models", { method: "GET" }, 30_000);
     return { capabilities: configured };
   } catch (error) {
     const safe = normalizeProviderError(error);
