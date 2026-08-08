@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement, type RefObject } from 'react';
+import { API_BASE } from './api-client';
 
 interface Pagination { page: number; pageSize: number; total: number; totalPages: number }
 interface PageResponse<T> { items: T[]; pagination: Pagination }
@@ -28,8 +29,6 @@ export interface InfiniteAssetsState<T> {
 }
 
 const PAGE_SIZE = 36;
-const API_BASE = 'http://127.0.0.1:3000';
-
 function pageUrl(basePath: string, page: number): string {
   const target = /^https?:\/\//.test(basePath) ? basePath : `${API_BASE}${basePath}`;
   const separator = target.includes('?') ? '&' : '?';

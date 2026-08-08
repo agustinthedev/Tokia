@@ -739,6 +739,7 @@ export async function buildApp(
       return {
         advanced: runtimeSettingsSnapshot(settings),
         advancedDefaults: defaultRuntimeSettings,
+        backendBaseUrl: `http://${settings.host}:${settings.port}`,
         restartRequired: changed,
         message: changed ? "Advanced settings saved. Restart the API to apply all changes." : "Advanced settings are unchanged.",
       };

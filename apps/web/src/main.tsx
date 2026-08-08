@@ -5,7 +5,7 @@ import { bindPreviewGallery } from "./preview-gallery";
 import "./styles.css";
 import { AiProvidersPage } from "./AiProvidersPage";
 import { ClippingWizard } from "./ClippingWizard";
-import { API_BASE, apiRequest, getIntegrationToken, setIntegrationToken } from "./api-client";
+import { API_BASE, apiRequest, getIntegrationToken, setApiBase, setIntegrationToken } from "./api-client";
 import "./clipping.css";
 
 type AnyRecord = Record<string, any>;
@@ -1979,6 +1979,7 @@ function AdvancedSettingsPanel({ data }: { data: AnyRecord | null }): ReactEleme
         }),
       });
       if (saved.advanced) setForm(advancedSettingsForm(saved.advanced as AdvancedRuntimeSettings));
+      if (typeof saved.backendBaseUrl === "string") setApiBase(saved.backendBaseUrl);
       setNotice(saved.message ?? "Advanced settings saved.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save advanced settings");
