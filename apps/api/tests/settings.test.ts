@@ -83,4 +83,42 @@ describe("local browser extension settings", () => {
     expect(settings.json()).not.toHaveProperty("localIntegrationToken");
     expect(settings.json()).not.toHaveProperty("integrationToken");
   });
+
+  it("bootstraps the local client and rotates the token without restarting", async () => {
+    db = createDatabase(":memory:");
+    app = await buildApp({
+      db,
+      settings: { ...config, localIntegrationToken: token },
+    });
+
+    const bootstrap = await app.inject({ method: "GET", url: "/api/settings/bootstrap" });
+    expect(bootstrap.statusCode).toBe(200);
+    expect(bootstrap.json().integrationToken).toBe(token);
+
+    const rotated = await app.inject({
+      method: "POST",
+      url: "/api/settings/integration-token",
+      headers: { "x-local-integration-token": token },
+    });
+    expect(rotated.statusCode).toBe(200);
+    const nextToken = rotated.json().integrationToken;
+    expect(nextToken).toMatch(/^[a-f0-9]{48}$/);
+    expect(nextToken).not.toBe(token);
+
+    const oldTokenRequest = await app.inject({
+      method: "PATCH",
+      url: "/api/settings/browser-extension",
+      headers: { "x-local-integration-token": token },
+      payload: { extensionId },
+    });
+    expect(oldTokenRequest.statusCode).toBe(401);
+
+    const newTokenRequest = await app.inject({
+      method: "PATCH",
+      url: "/api/settings/browser-extension",
+      headers: { "x-local-integration-token": nextToken },
+      payload: { extensionId },
+    });
+    expect(newTokenRequest.statusCode).toBe(200);
+  });
 });

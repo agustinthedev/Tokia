@@ -78,6 +78,7 @@ type AppSettings = typeof defaultConfig;
 type QueryRecord = Record<string, string | undefined>;
 type Row = Record<string, any>;
 const BROWSER_EXTENSION_SETTING_KEY = "browser_extension_id";
+const LOCAL_INTEGRATION_TOKEN_SETTING_KEY = "local_integration_token";
 
 function positiveInt(
   value: string | undefined,
@@ -123,11 +124,28 @@ function browserExtensionIdFromOrigin(origin: string | undefined): string | null
   const match = /^chrome-extension:\/\/([a-p]{32})$/i.exec(origin.trim());
   return match?.[1]?.toLowerCase() ?? null;
 }
-function browserExtensionId(db: Database.Database, settings: AppSettings): string | null {
+function applicationSetting(db: Database.Database, key: string): string | null {
   const stored = db
     .prepare("SELECT setting_value FROM application_settings WHERE setting_key = ?")
-    .get(BROWSER_EXTENSION_SETTING_KEY) as { setting_value?: string } | undefined;
-  if (stored?.setting_value) return stored.setting_value;
+    .get(key) as { setting_value?: string } | undefined;
+  return stored?.setting_value?.trim() || null;
+}
+function saveApplicationSetting(db: Database.Database, key: string, value: string): void {
+  db.prepare(
+    `INSERT INTO application_settings(setting_key, setting_value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at`,
+  ).run(key, value, now());
+}
+function ensureLocalIntegrationToken(db: Database.Database, fallback: string): string {
+  const stored = applicationSetting(db, LOCAL_INTEGRATION_TOKEN_SETTING_KEY);
+  if (stored) return stored;
+  saveApplicationSetting(db, LOCAL_INTEGRATION_TOKEN_SETTING_KEY, fallback);
+  return fallback;
+}
+function browserExtensionId(db: Database.Database, settings: AppSettings): string | null {
+  const stored = applicationSetting(db, BROWSER_EXTENSION_SETTING_KEY);
+  if (stored) return stored;
   return settings.corsAllowedOrigins
     .map((origin) => browserExtensionIdFromOrigin(origin))
     .find((value): value is string => Boolean(value)) ?? null;
@@ -522,8 +540,12 @@ function projectSnapshot(db: Database.Database, id: string): Row | undefined {
 export async function buildApp(
   options: { db?: Database.Database; settings?: AppSettings } = {},
 ): Promise<any> {
-  const settings = options.settings ?? defaultConfig;
-  const db = options.db ?? createDatabase(settings.databasePath);
+  const baseSettings = options.settings ?? defaultConfig;
+  const db = options.db ?? createDatabase(baseSettings.databasePath);
+  const settings = {
+    ...baseSettings,
+    localIntegrationToken: ensureLocalIntegrationToken(db, baseSettings.localIntegrationToken),
+  };
   const ownsDatabase = !options.db;
   const app = Fastify({
     logger: { level: settings.logLevel },
@@ -594,6 +616,19 @@ export async function buildApp(
     }),
   );
   app.get(
+    "/api/settings/bootstrap",
+    {
+      schema: {
+        tags: ["diagnostics"],
+        summary: "Bootstrap the local web client without environment configuration",
+      },
+    },
+    async () => ({
+      integrationToken: settings.localIntegrationToken,
+      backendBaseUrl: `http://${settings.host}:${settings.port}`,
+    }),
+  );
+  app.get(
     "/api/settings",
     {
       schema: {
@@ -613,6 +648,22 @@ export async function buildApp(
       browserExtensionOrigin: browserExtensionOrigin(db, settings),
       maxPinsPerImport: settings.maxPinsPerImport,
     }),
+  );
+  app.post(
+    "/api/settings/integration-token",
+    {
+      schema: {
+        tags: ["diagnostics"],
+        summary: "Generate a new local integration token",
+      },
+    },
+    async (request, reply) => {
+      if (!integrationGuard(settings, request, reply)) return;
+      const token = crypto.randomBytes(24).toString("hex");
+      saveApplicationSetting(db, LOCAL_INTEGRATION_TOKEN_SETTING_KEY, token);
+      settings.localIntegrationToken = token;
+      return { integrationTokenConfigured: true, integrationToken: token };
+    },
   );
   app.patch(
     "/api/settings/browser-extension",
