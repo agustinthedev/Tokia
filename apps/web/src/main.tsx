@@ -1806,8 +1806,11 @@ function BrowserExtensionSettings({
           <span>Managed automatically by Tokia for local API access.</span>
         </div>
         <div className="detail-actions extension-row-actions">
-          <span className="setting-value online">Configured</span>
-          <Button onClick={() => void rotateIntegrationToken()} disabled={rotatingToken || connecting || saving}>
+          <span className="setting-value online">
+            <span className="online-dot" />
+            Configured
+          </span>
+          <Button className="extension-action-button" onClick={() => void rotateIntegrationToken()} disabled={rotatingToken || connecting || saving}>
             {rotatingToken ? "Generatingâ€¦" : "Generate new token"}
           </Button>
         </div>
@@ -1846,7 +1849,7 @@ function BrowserExtensionSettings({
               {isConnected && <span className="online-dot" />}
               {isConnected ? "Connected" : "Detected"}
             </span>
-            <Button variant="primary" onClick={() => void connect()} disabled={connecting || saving}>
+            <Button className="extension-action-button" variant="primary" onClick={() => void connect()} disabled={connecting || saving}>
               {connecting ? "Connecting…" : "Connect extension"}
             </Button>
           </div>
