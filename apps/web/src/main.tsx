@@ -2799,7 +2799,21 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               <div className="frame-selection-group" key={frame.id}>
                 <div className="frame-selection-row" draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", frame.id)}>
                 <span className="frame-number">{frame.position}</span>
-                <div className="frame-selection-preview">{frame.sourceMedia ? <MediaPreview asset={frame.sourceMedia} /> : <span>?</span>}</div>
+                <div className="frame-selection-preview">
+                  {frame.sourceMedia ? (
+                    <button
+                      type="button"
+                      className="frame-selection-preview-button"
+                      onClick={() => setSourcePreview({ frame, asset: frame.sourceMedia! })}
+                      title="Preview assigned content"
+                      aria-label={`Preview assigned content for slot ${frame.position}`}
+                    >
+                      <MediaPreview asset={frame.sourceMedia} />
+                    </button>
+                  ) : (
+                    <span>?</span>
+                  )}
+                </div>
                 <div>
                   <strong>{frame.role}{frame.sourceMedia ? ` (${frame.sourceMedia.mediaType === "video" || frame.sourceMedia.mediaType === "animated" ? "video" : "image"})` : ""}</strong>
                   <span>
