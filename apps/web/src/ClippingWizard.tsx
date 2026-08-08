@@ -544,6 +544,11 @@ export function ClippingWizard({
                 extract audio, transcribe it, and find topics.
               </div>
             )}
+            {processing && state?.source?.processingStage === "transcribing" && (
+              <div className="inline-note">
+                Transcription can take a few minutes for longer videos.
+              </div>
+            )}
             {state?.source?.errorMessage && (
               <div className="inline-error">
                 <strong>Processing failed.</strong>

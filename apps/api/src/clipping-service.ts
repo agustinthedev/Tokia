@@ -858,6 +858,7 @@ async function runJob(
         provider,
         settings.secretsEncryptionKey,
         audioPath,
+        source.duration_ms,
       );
       const meta = await fileMetadata(audioPath);
       await persistTranscript(db, source, provider, result, meta.sha256);

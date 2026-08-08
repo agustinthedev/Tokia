@@ -88,6 +88,10 @@ const LOCAL_DEFAULT_CAPABILITIES: ProviderCapabilities = {
 
 type Row = Record<string, any>;
 const OPENAI_TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;
+const TRANSCRIPTION_TIMEOUT_BASE_MS = 60_000;
+const TRANSCRIPTION_TIMEOUT_PER_MINUTE_MS = 5_000;
+const TRANSCRIPTION_TIMEOUT_MIN_MS = 90_000;
+const TRANSCRIPTION_TIMEOUT_MAX_MS = 300_000;
 function now(): string {
   return new Date().toISOString();
 }
@@ -377,6 +381,21 @@ export function transcriptionModelForClipping(row: Row): string {
   return configured || "whisper-1";
 }
 
+export function transcriptionTimeoutMs(durationMs: number): number {
+  const durationMinutes = Math.max(
+    1,
+    Math.ceil(Math.max(0, Number(durationMs) || 0) / 60_000),
+  );
+  return Math.min(
+    TRANSCRIPTION_TIMEOUT_MAX_MS,
+    Math.max(
+      TRANSCRIPTION_TIMEOUT_MIN_MS,
+      TRANSCRIPTION_TIMEOUT_BASE_MS +
+        durationMinutes * TRANSCRIPTION_TIMEOUT_PER_MINUTE_MS,
+    ),
+  );
+}
+
 export function hasRequiredCapability(row: Row, task: AiTask): boolean {
   if (row.status !== "connected") return false;
   const caps = providerCapabilities(row);
@@ -579,6 +598,7 @@ export async function transcribe(
   row: Row,
   masterSecret: string,
   audioPath: string,
+  audioDurationMs = 0,
 ): Promise<NormalizedTranscript> {
   const caps = providerCapabilities(row);
   if (!caps.audioTranscription || !caps.timestampedSegments)
@@ -615,6 +635,7 @@ export async function transcribe(
     masterSecret,
     "/audio/transcriptions",
     { method: "POST", body: form },
+    transcriptionTimeoutMs(audioDurationMs),
   );
   let json: any;
   try {

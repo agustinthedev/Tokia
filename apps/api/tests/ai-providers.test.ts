@@ -8,6 +8,7 @@ import {
   normalizeProviderError,
   providerSafe,
   transcriptionModelForClipping,
+  transcriptionTimeoutMs,
 } from "../src/ai-providers.js";
 
 describe("AI provider security and capability model", () => {
@@ -98,5 +99,11 @@ describe("AI provider security and capability model", () => {
         transcription_model: "custom-transcribe",
       }),
     ).toBe("custom-transcribe");
+  });
+
+  it("scales transcription timeout with the source duration", () => {
+    expect(transcriptionTimeoutMs(0)).toBe(90_000);
+    expect(transcriptionTimeoutMs(19 * 60_000 + 26_000)).toBe(160_000);
+    expect(transcriptionTimeoutMs(2 * 60 * 60_000)).toBe(300_000);
   });
 });
