@@ -45,6 +45,7 @@ type ClipJobType =
 const CLIPPING_AUDIO_FILENAME = "audio-16k.mp3";
 const MIN_CLIP_DURATION_MS = 15_000;
 const MAX_CLIP_DURATION_MS = 90_000;
+const MIN_TOPIC_DURATION_MS = 60_000;
 function id(): string {
   return crypto.randomUUID();
 }
@@ -878,6 +879,21 @@ async function persistAnalysis(
         startMs = partitionStart;
         endMs = Math.max(startMs + 1, partitionEnd);
       }
+      const minimumTopicDuration = Math.min(
+        sourceDurationMs,
+        MIN_TOPIC_DURATION_MS,
+      );
+      if (endMs - startMs < minimumTopicDuration) {
+        const center = (startMs + endMs) / 2;
+        startMs = Math.max(
+          0,
+          Math.min(
+            sourceDurationMs - minimumTopicDuration,
+            Math.round(center - minimumTopicDuration / 2),
+          ),
+        );
+        endMs = startMs + minimumTopicDuration;
+      }
       validateClipBounds(startMs, endMs, source.duration_ms);
       const topicId = id();
       const topicExcerpt = transcriptExcerpt(
@@ -1042,7 +1058,7 @@ async function runJob(
         {
           schemaName: "video_topic_tree",
           system:
-            "Return JSON matching the requested schema. Identify semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Use coherent passages of roughly 15 to 90 seconds for clips, never isolated sentences or 1 to 4 second fragments. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1 or Clip 1. Do not invent unsupported claims.",
+            "Return JSON matching the requested schema. Identify broad semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. A topic is a meaningful section of the discussion, not a single sentence or a few-second fragment; when the transcript supports it, make topics at least about 60 seconds long. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Every clip must be completely inside its parent topic range; set each topic range to contain all of its clips. Use coherent passages of roughly 15 to 90 seconds for clips, never isolated sentences or 1 to 4 second fragments. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1 or Clip 1. Do not invent unsupported claims.",
           user: `Source duration: ${source.duration_ms}ms\nTranscript:\n${prompt}`,
         },
       );
