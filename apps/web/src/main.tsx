@@ -1795,11 +1795,11 @@ function SettingsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }):
         {(
           [
             ["connection", "Connection", "settings"],
-            ["api", "API", "arrow"],
             ["preview", "Preview", "image"],
             ["ai-providers", "AI Providers", "settings"],
             ["assets", "Assets", "assets"],
             ["imports", "Imports", "imports"],
+            ["api", "API", "arrow"],
           ] as const
         ).map(([key, label, icon]) => (
           <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? "active" : ""} onClick={() => selectTab(key)}>
