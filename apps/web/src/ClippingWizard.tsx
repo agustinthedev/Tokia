@@ -165,22 +165,32 @@ export function ClippingWizard({
     const startSeconds = Number(previewCandidate.startMs ?? 0) / 1000;
     const endSeconds = Number(previewCandidate.endMs ?? 0) / 1000;
     const seekToCandidate = (): void => {
+      if (!Number.isFinite(startSeconds) || video.readyState < 1) return;
+      video.pause();
       video.currentTime = startSeconds;
     };
     const stopAtCandidateEnd = (): void => {
-      if (video.currentTime >= endSeconds) {
+      if (endSeconds > startSeconds && video.currentTime >= endSeconds) {
         video.pause();
         video.currentTime = startSeconds;
       }
     };
     video.addEventListener("loadedmetadata", seekToCandidate);
+    video.addEventListener("loadeddata", seekToCandidate);
     video.addEventListener("timeupdate", stopAtCandidateEnd);
-    seekToCandidate();
+    const seekTimer = window.setTimeout(seekToCandidate, 0);
     return () => {
       video.removeEventListener("loadedmetadata", seekToCandidate);
+      video.removeEventListener("loadeddata", seekToCandidate);
       video.removeEventListener("timeupdate", stopAtCandidateEnd);
+      window.clearTimeout(seekTimer);
     };
-  }, [previewCandidate?.subtopicId, state?.source?.id]);
+  }, [
+    previewCandidate?.id,
+    previewCandidate?.startMs,
+    previewCandidate?.endMs,
+    state?.source?.id,
+  ]);
   const ensureDraft = async (): Promise<string> => {
     if (contentId) return contentId;
     const draft = await api<AnyRecord>(`/api/projects/${project.id}/content`, {
@@ -1093,6 +1103,7 @@ export function ClippingWizard({
               </header>
               <video
                 ref={previewRef}
+                key={previewCandidate.id}
                 className="clipping-preview-video"
                 controls
                 autoPlay

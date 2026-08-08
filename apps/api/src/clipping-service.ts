@@ -824,23 +824,6 @@ async function persistAnalysis(
                 confidence: topic.confidence,
               },
             ];
-      const childRanges = children
-        .map((child) => ({
-          startMs: finiteMilliseconds(child.startMs),
-          endMs: finiteMilliseconds(child.endMs),
-        }))
-        .filter(
-          (range) =>
-            range.startMs !== undefined &&
-            range.endMs !== undefined &&
-            range.endMs > range.startMs,
-        ) as Array<{ startMs: number; endMs: number }>;
-      const inferredStart = childRanges.length
-        ? Math.min(...childRanges.map((range) => range.startMs))
-        : undefined;
-      const inferredEnd = childRanges.length
-        ? Math.max(...childRanges.map((range) => range.endMs))
-        : undefined;
       const partitionStart = Math.round(
         (sourceDurationMs * topicIndex) / topics.length,
       );
@@ -849,21 +832,46 @@ async function persistAnalysis(
       );
       const rawTopicStart = finiteMilliseconds(topic.startMs);
       const rawTopicEnd = finiteMilliseconds(topic.endMs);
+      const normalizedChildren = children.slice(0, 30).map((child) => {
+        const rawChildStart =
+          finiteMilliseconds(child.startMs) ??
+          rawTopicStart ??
+          partitionStart;
+        const rawChildEnd =
+          finiteMilliseconds(child.endMs) ?? rawTopicEnd ?? partitionEnd;
+        return {
+          child,
+          range: normalizeClipRange(
+            rawChildStart,
+            rawChildEnd,
+            sourceDurationMs,
+          ),
+        };
+      });
+      const childRanges = normalizedChildren.map(({ range }) => range);
+      const inferredStart = childRanges.length
+        ? Math.min(...childRanges.map((range) => range.startMs))
+        : undefined;
+      const inferredEnd = childRanges.length
+        ? Math.max(...childRanges.map((range) => range.endMs))
+        : undefined;
       const wholeSourceRange =
         rawTopicStart !== undefined &&
         rawTopicEnd !== undefined &&
         rawTopicStart <= 0 &&
         rawTopicEnd >= sourceDurationMs;
-      let startMs =
-        inferredStart !== undefined &&
-        (rawTopicStart === undefined || wholeSourceRange)
-          ? inferredStart
-          : (rawTopicStart ?? partitionStart);
-      let endMs =
-        inferredEnd !== undefined &&
-        (rawTopicEnd === undefined || wholeSourceRange)
-          ? inferredEnd
-          : (rawTopicEnd ?? partitionEnd);
+      let startMs = rawTopicStart ?? partitionStart;
+      let endMs = rawTopicEnd ?? partitionEnd;
+      if (inferredStart !== undefined)
+        startMs =
+          rawTopicStart === undefined || wholeSourceRange
+            ? inferredStart
+            : Math.min(startMs, inferredStart);
+      if (inferredEnd !== undefined)
+        endMs =
+          rawTopicEnd === undefined || wholeSourceRange
+            ? inferredEnd
+            : Math.max(endMs, inferredEnd);
       startMs = Math.max(0, Math.min(sourceDurationMs, startMs));
       endMs = Math.max(0, Math.min(sourceDurationMs, endMs));
       if (endMs <= startMs) {
@@ -902,17 +910,9 @@ async function persistAnalysis(
           .update(`${source.source_hash}:${topicId}`)
           .digest("hex"),
       );
-      children.slice(0, 30).forEach((child, childIndex) => {
-        const rawChildStart =
-          finiteMilliseconds(child.startMs) ?? startMs;
-        const rawChildEnd = finiteMilliseconds(child.endMs) ?? endMs;
-        const normalizedRange = normalizeClipRange(
-          rawChildStart,
-          rawChildEnd,
-          sourceDurationMs,
-        );
-        const childStart = normalizedRange.startMs;
-        const childEnd = normalizedRange.endMs;
+      normalizedChildren.forEach(({ child, range }, childIndex) => {
+        const childStart = range.startMs;
+        const childEnd = range.endMs;
         validateClipBounds(childStart, childEnd, source.duration_ms);
         const subtopicId = id();
         const childExcerpt = transcriptExcerpt(
