@@ -425,6 +425,7 @@ async function providerFetch(
   masterSecret: string,
   endpoint: string,
   init: RequestInit = {},
+  timeoutMs = 45_000,
 ): Promise<Response> {
   if (!row.base_url)
     throw providerError(
@@ -432,7 +433,7 @@ async function providerFetch(
       "The provider base URL is not configured.",
     );
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const secret = row.encrypted_secret
       ? decryptSecret(String(row.encrypted_secret), masterSecret)
@@ -476,7 +477,7 @@ export async function validateProvider(
         "Local Whisper is configured, but this deployment does not bundle a supported runtime adapter.",
       );
     }
-    await providerFetch(row, masterSecret, "/models", { method: "GET" });
+    await providerFetch(row, masterSecret, "/models", { method: "GET" }, 15_000);
     return { capabilities: configured };
   } catch (error) {
     const safe = normalizeProviderError(error);
