@@ -54,6 +54,8 @@ const TARGET_CLIP_DURATION_MS = 120_000;
 const MAX_CLIP_DURATION_MS = 180_000;
 const MIN_TOPIC_DURATION_MS = 5 * 60_000;
 const MAX_TOPIC_DURATION_MS = 15 * 60_000;
+const TOPIC_ANALYSIS_VERSION = "topic-v2";
+const TOPIC_PROMPT_VERSION = "clip-analysis-v2";
 
 function offsetTranscript(transcript: NormalizedTranscript, offsetMs: number): NormalizedTranscript {
   const offsetWord = (word: NormalizedTranscriptWord): NormalizedTranscriptWord => ({
@@ -671,14 +673,21 @@ export function startAnalysis(
     if (active) return active;
     const completedAnalysis = db
       .prepare(
-        "SELECT j.* FROM clipping_jobs j WHERE j.content_id = ? AND j.job_type = 'subtopic_detection' AND j.status = 'completed' AND EXISTS (SELECT 1 FROM transcripts t WHERE t.source_id = j.source_id) AND EXISTS (SELECT 1 FROM video_topics vt WHERE vt.source_id = j.source_id) ORDER BY j.created_at DESC LIMIT 1",
+        "SELECT j.* FROM clipping_jobs j WHERE j.content_id = ? AND j.job_type = 'subtopic_detection' AND j.status = 'completed' AND EXISTS (SELECT 1 FROM transcripts t WHERE t.source_id = j.source_id) AND EXISTS (SELECT 1 FROM video_topics vt WHERE vt.source_id = j.source_id AND vt.analysis_version = ? AND vt.prompt_version = ?) ORDER BY j.created_at DESC LIMIT 1",
       )
-      .get(contentId) as Row | undefined;
+      .get(contentId, TOPIC_ANALYSIS_VERSION, TOPIC_PROMPT_VERSION) as
+      | Row
+      | undefined;
     if (source.status === "ready" && completedAnalysis)
       return completedAnalysis;
   }
   providerForTask(db, "TRANSCRIPTION");
+  const transcript = db
+    .prepare("SELECT id FROM transcripts WHERE source_id = ?")
+    .get(source.id) as Row | undefined;
   providerForTask(db, "TOPIC_DETECTION");
+  if (source.status === "ready" && transcript)
+    return queueClippingJob(db, contentId, "topic_detection");
   return queueClippingJob(db, contentId, "audio_extraction");
 }
 
@@ -1095,8 +1104,8 @@ async function persistAnalysis(
         Number.isFinite(Number(topic.confidence))
           ? Number(topic.confidence)
           : null,
-        "topic-v1",
-        "clip-analysis-v1",
+        TOPIC_ANALYSIS_VERSION,
+        TOPIC_PROMPT_VERSION,
         crypto
           .createHash("sha256")
           .update(`${source.source_hash}:${topicId}`)
