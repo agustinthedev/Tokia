@@ -675,8 +675,8 @@ export async function structuredAnalysis<T>(
         type: "object",
         additionalProperties: false,
         properties: {
-          title: { type: "string", minLength: 3, maxLength: 160 },
-          summary: { type: "string", maxLength: 1000 },
+          title: { type: "string", minLength: 3, maxLength: 100 },
+          summary: { type: "string", maxLength: 300 },
           startMs: { type: "integer", minimum: 0 },
           endMs: { type: "integer", minimum: 1 },
           confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -700,8 +700,8 @@ export async function structuredAnalysis<T>(
                   type: "object",
                   additionalProperties: false,
                   properties: {
-                    title: { type: "string", minLength: 3, maxLength: 160 },
-                    summary: { type: "string", maxLength: 1000 },
+                    title: { type: "string", minLength: 3, maxLength: 100 },
+                    summary: { type: "string", maxLength: 300 },
                     startMs: { type: "integer", minimum: 0 },
                     endMs: { type: "integer", minimum: 1 },
                     confidence: { type: "number", minimum: 0, maximum: 1 },

@@ -55,7 +55,7 @@ const MAX_CLIP_DURATION_MS = 180_000;
 const MIN_TOPIC_DURATION_MS = 5 * 60_000;
 const MAX_TOPIC_DURATION_MS = 15 * 60_000;
 const TOPIC_ANALYSIS_VERSION = "topic-v2";
-const TOPIC_PROMPT_VERSION = "clip-analysis-v2";
+const TOPIC_PROMPT_VERSION = "clip-analysis-v3";
 
 function offsetTranscript(transcript: NormalizedTranscript, offsetMs: number): NormalizedTranscript {
   const offsetWord = (word: NormalizedTranscriptWord): NormalizedTranscriptWord => ({
@@ -819,10 +819,56 @@ function readableAnalysisText(value: unknown): string {
   return text.slice(0, 200);
 }
 
+function truncateAnalysisText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const shortened = value.slice(0, Math.max(1, maxLength - 1));
+  const boundary = shortened.lastIndexOf(" ");
+  return `${shortened.slice(0, boundary > maxLength * 0.55 ? boundary : shortened.length)}…`;
+}
+
+function normalizedWords(value: string): string[] {
+  return value
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function isLikelyTranscriptCopy(value: string, excerpt: string): boolean {
+  if (value.length < 80 || !excerpt) return false;
+  const candidateWords = normalizedWords(value);
+  const excerptWords = normalizedWords(excerpt);
+  if (candidateWords.length < 10 || excerptWords.length < 10) return false;
+  const excerptSet = new Set(excerptWords);
+  const overlap = candidateWords.filter((word) => excerptSet.has(word)).length;
+  return (
+    excerpt.includes(value) ||
+    value.includes(excerpt) ||
+    overlap / candidateWords.length >= 0.8
+  );
+}
+
+function meaningfulAnalysisText(
+  value: unknown,
+  transcriptExcerptText: string,
+  maxLength: number,
+): string {
+  const text = readableAnalysisText(value);
+  if (!text || isLikelyTranscriptCopy(text, transcriptExcerptText)) return "";
+  return truncateAnalysisText(text, maxLength);
+}
+
 function transcriptTitle(value: string): string {
   const text = value.replace(/\s+/g, " ").trim();
   if (!text) return "";
-  return (text.split(/(?<=[.!?])\s+/)[0] || text).slice(0, 120);
+  return truncateAnalysisText(text.split(/(?<=[.!?])\s+/)[0] || text, 100);
+}
+
+function shortExcerptTitle(value: string): string {
+  const words = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  if (!words.length) return "";
+  return `${words.slice(0, 8).join(" ")}${words.length > 8 ? "…" : ""}`;
 }
 
 function transcriptExcerpt(
@@ -1083,16 +1129,19 @@ async function persistAnalysis(
         endMs,
       );
       const topicTitle =
-        readableAnalysisText(topic.title) ||
-        readableAnalysisText(topic.summary) ||
-        topicExcerpt ||
+        meaningfulAnalysisText(topic.title, topicExcerpt, 100) ||
+        meaningfulAnalysisText(topic.summary, topicExcerpt, 100) ||
+        shortExcerptTitle(topicExcerpt) ||
         "Key discussion";
       const displayedTopicTitle =
         part.partCount > 1
           ? `${topicTitle} · Part ${part.partNumber}`
           : topicTitle;
       const topicSummary =
-        readableAnalysisText(topic.summary) || topicExcerpt || null;
+        meaningfulAnalysisText(topic.summary, topicExcerpt, 220) ||
+        (topicTitle === "Key discussion"
+          ? null
+          : `Discussion focused on ${topicTitle}.`);
       insertTopic.run(
         topicId,
         source.id,
@@ -1122,12 +1171,13 @@ async function persistAnalysis(
           childEnd,
         );
         const childTitle =
-          readableAnalysisText(child.title) ||
-          readableAnalysisText(child.summary) ||
+          meaningfulAnalysisText(child.title, childExcerpt, 100) ||
           transcriptTitle(childExcerpt) ||
-          displayedTopicTitle;
+          `Key point from ${displayedTopicTitle}`;
         const childSummary =
-          readableAnalysisText(child.summary) || childExcerpt || null;
+          meaningfulAnalysisText(child.summary, childExcerpt, 220) ||
+          topicSummary ||
+          `A highlight from ${displayedTopicTitle}.`;
         insertSubtopic.run(
           subtopicId,
           topicId,
@@ -1246,7 +1296,7 @@ async function runJob(
         {
           schemaName: "video_topic_tree",
           system:
-            "Return JSON matching the requested schema. Identify broad semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. A topic is a meaningful section of the discussion, not a single sentence or a few-second fragment; when the transcript supports it, make topics roughly 5 to 15 minutes long and avoid topics that span unrelated parts of the video. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Every clip must be completely inside its parent topic range; set each topic range to contain all of its clips. Prefer coherent clips of at least 2 minutes and about 2 minutes when possible, never return isolated 1 to 4 second fragments. Within a topic, return enough distinct clips to cover the meaningful discussion instead of only the first and last sentence; do not leave very large unexplained gaps. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1, Clip 1, or Additional discussion. Do not invent unsupported claims.",
+            "Return JSON matching the requested schema. Identify broad semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. A topic is a meaningful section of the discussion, not a single sentence or a few-second fragment; when the transcript supports it, make topics roughly 5 to 15 minutes long and avoid topics that span unrelated parts of the video. Every topic needs a concise editorial title (3 to 100 characters) and a brief 1-2 sentence summary (no more than 220 characters), plus startMs and endMs. Every clip needs its own concise editorial title and brief summary of the idea, not a transcript quotation. Never copy a sentence or paragraph verbatim from the transcript into a title or summary. Every clip must be completely inside its parent topic range; set each topic range to contain all of its clips. Prefer coherent clips of at least 2 minutes and about 2 minutes when possible, never return isolated 1 to 4 second fragments. Within a topic, return enough distinct clips to cover the meaningful discussion instead of only the first and last sentence; do not leave very large unexplained gaps. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1, Clip 1, or Additional discussion. Do not invent unsupported claims.",
           user: `Source duration: ${source.duration_ms}ms\nTranscript:\n${prompt}`,
         },
       );
