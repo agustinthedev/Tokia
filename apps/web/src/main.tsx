@@ -7,6 +7,7 @@ import { AiProvidersPage } from "./AiProvidersPage";
 import { ClippingWizard } from "./ClippingWizard";
 import { API_BASE, apiRequest, getIntegrationToken, setApiBase, setIntegrationToken } from "./api-client";
 import "./clipping.css";
+import "./saas-theme.css";
 
 type AnyRecord = Record<string, any>;
 type PageKey = "home" | "collections" | "assets" | "projects" | "imports" | "settings";
@@ -638,49 +639,93 @@ function Shell({ route, children, onSearch }: { route: { page: PageKey; id?: str
     { key: "collections", label: "Collections", icon: "collections" },
     { key: "projects", label: "Projects", icon: "projects" },
   ];
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth <= 860);
+  const wasMobile = useRef(typeof window !== "undefined" && window.innerWidth <= 860);
+  useEffect(() => {
+    const handleResize = (): void => {
+      const isMobile = window.innerWidth <= 860;
+      if (isMobile !== wasMobile.current) {
+        setCollapsed(isMobile);
+        wasMobile.current = isMobile;
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+  const goTo = (path: string): void => {
+    navigate(path);
+    if (window.innerWidth <= 860) setCollapsed(true);
+  };
   return (
     <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="sidebar">
+      <aside className="sidebar" id="tokia-sidebar" aria-label="Workspace navigation">
         <div className="brand">
           <div className="brand-mark">
             <img src="/tokia-rocket.svg" alt="" />
           </div>
-          <span>Tokia</span>
+          <span className="brand-copy">
+            <strong>Tokia</strong>
+            <small>Creative workspace</small>
+          </span>
         </div>
         <nav className="nav-list" aria-label="Main navigation">
           {links.map((link) => (
-            <button key={link.key} className={`nav-item ${route.page === link.key ? "active" : ""}`} onClick={() => navigate(link.key === "home" ? "/" : `/${link.key}`)}>
+            <button
+              key={link.key}
+              className={`nav-item ${route.page === link.key ? "active" : ""}`}
+              onClick={() => goTo(link.key === "home" ? "/" : `/${link.key}`)}
+              aria-current={route.page === link.key ? "page" : undefined}
+              title={collapsed ? link.label : undefined}
+            >
               <Icon name={link.icon} />
               <span>{link.label}</span>
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className={`nav-item ${route.page === "settings" ? "active" : ""}`} onClick={() => navigate("/settings")}>
+          <button
+            className={`nav-item ${route.page === "settings" ? "active" : ""}`}
+            onClick={() => goTo("/settings")}
+            aria-current={route.page === "settings" ? "page" : undefined}
+            title={collapsed ? "Settings" : undefined}
+          >
             <Icon name="settings" />
             <span>Settings</span>
           </button>
           <div className="connection-card">
-            <span className="online-dot" /> <span>Local backend online</span>
+            <span className="online-dot" />
+            <span className="connection-copy">
+              <strong>Backend online</strong>
+              <small>Local workspace</small>
+            </span>
           </div>
           <button className="collapse-button" onClick={() => setCollapsed((value) => !value)} aria-label="Toggle sidebar">
             <Icon name={collapsed ? "arrow-right" : "arrow-left"} />
           </button>
         </div>
       </aside>
+      {!collapsed && <button className="sidebar-scrim" onClick={() => setCollapsed(true)} aria-label="Close navigation" />}
       <main className="main-area">
         <header className="topbar">
-          <button className="mobile-menu" onClick={() => setCollapsed((value) => !value)} aria-label="Toggle navigation">
+          <button
+            className="mobile-menu"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label="Toggle navigation"
+            aria-controls="tokia-sidebar"
+            aria-expanded={!collapsed}
+          >
             <Icon name="menu" />
           </button>
-          <button className="global-search" onClick={onSearch}>
+          <button className="global-search" onClick={onSearch} aria-label="Search workspace">
             <Icon name="search" />
             <span>Search collections, assets, projects...</span>
             <kbd>⌘ K</kbd>
           </button>
           <div className="topbar-actions">
-            <span className="workspace-label">Local workspace</span>
+            <span className="workspace-label">
+              <strong>Local workspace</strong>
+              <small>Private library</small>
+            </span>
             <div className="avatar">TK</div>
           </div>
         </header>
@@ -701,25 +746,26 @@ function DashboardPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void })
       <SectionHeader
         eyebrow="Overview"
         title="Good to see you"
-        description="A live view of your imported creative library."
+        description="Everything happening across your creative library, at a glance."
         action={
           <Button variant="primary" onClick={() => navigate("/collections")}>
             <Icon name="collections" /> Browse collections
           </Button>
         }
       />
-      <div className="stats-grid">
+      <section className="stats-grid" aria-label="Library overview">
         <StatCard label="Collections" value={stats.totalCollections} detail="all sources" icon="collections" />
         <StatCard label="Total assets" value={stats.totalAssets} detail="across library" icon="assets" tone="violet" />
         <StatCard label="Images" value={stats.totalImages} detail={`${imagePercent}% of library`} icon="image" tone="cyan" />
         <StatCard label="Videos" value={stats.totalVideos} detail="ready to review" icon="video" tone="orange" />
-      </div>
+      </section>
       <div className="dashboard-grid">
         <section className="panel recent-panel">
           <div className="panel-heading">
             <div>
               <div className="eyebrow">Library pulse</div>
               <h2>Recently imported</h2>
+              <p className="panel-subtitle">The newest additions from your connected collections.</p>
             </div>
             <button className="text-button" onClick={() => navigate("/assets")}>
               View all <Icon name="arrow" />
@@ -747,6 +793,7 @@ function DashboardPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void })
             <div>
               <div className="eyebrow">Media mix</div>
               <h2>Library composition</h2>
+              <p className="panel-subtitle">A quick view of the formats available for your next project.</p>
             </div>
             <span className="panel-caption">{compact(stats.totalAssets)} assets</span>
           </div>
@@ -780,7 +827,7 @@ function DashboardPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void })
         </section>
       </div>
       <div className="dashboard-grid lower-grid">
-        <section className="panel">
+        <section className="panel collections-panel">
           <div className="panel-heading">
             <div>
               <div className="eyebrow">Most used sources</div>
@@ -812,7 +859,7 @@ function DashboardPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void })
             ))}
           </div>
         </section>
-        <section className="panel">
+        <section className="panel imports-panel">
           <div className="panel-heading">
             <div>
               <div className="eyebrow">Import health</div>
@@ -1827,7 +1874,7 @@ function BrowserExtensionSettings({
             Configured
           </span>
           <Button className="extension-action-button" onClick={() => void rotateIntegrationToken()} disabled={rotatingToken || connecting || saving}>
-            {rotatingToken ? "Generatingâ€¦" : "Generate new token"}
+            {rotatingToken ? "Generating…" : "Generate new token"}
           </Button>
         </div>
       </div>
