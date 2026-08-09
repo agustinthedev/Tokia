@@ -49,10 +49,10 @@ type ClipJobType =
   | "subtopic_detection"
   | "render_batch";
 const CLIPPING_AUDIO_FILENAME = "audio-16k.mp3";
-const MIN_CLIP_DURATION_MS = 90_000;
+const MIN_CLIP_DURATION_MS = 120_000;
 const TARGET_CLIP_DURATION_MS = 120_000;
 const MAX_CLIP_DURATION_MS = 180_000;
-const MIN_TOPIC_DURATION_MS = 60_000;
+const MIN_TOPIC_DURATION_MS = 5 * 60_000;
 const MAX_TOPIC_DURATION_MS = 15 * 60_000;
 
 function offsetTranscript(transcript: NormalizedTranscript, offsetMs: number): NormalizedTranscript {
@@ -801,8 +801,19 @@ function finiteMilliseconds(value: unknown): number | undefined {
 
 function readableAnalysisText(value: unknown): string {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
-  if (!text || /^(topic|clip)(?:\s+\d+)?$/i.test(text)) return "";
+  if (
+    !text ||
+    /^(topic|clip|additional discussion)(?:\s+\d+)?$/i.test(text) ||
+    /^additional discussion from the source transcript\.?$/i.test(text)
+  )
+    return "";
   return text.slice(0, 200);
+}
+
+function transcriptTitle(value: string): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return (text.split(/(?<=[.!?])\s+/)[0] || text).slice(0, 120);
 }
 
 function transcriptExcerpt(
@@ -849,7 +860,7 @@ function normalizeClipRangeWithin(
   if (end <= start) start = Math.max(lowerBound, end - MIN_CLIP_DURATION_MS);
   const availableDuration = upperBound - lowerBound;
   if (availableDuration <= MIN_CLIP_DURATION_MS)
-    return { startMs: start, endMs: Math.max(start + 1, end) };
+    return { startMs: lowerBound, endMs: upperBound };
   const targetDuration = Math.min(
     availableDuration,
     Math.max(MIN_CLIP_DURATION_MS, Math.min(MAX_CLIP_DURATION_MS, end - start)),
@@ -874,9 +885,10 @@ function fallbackClipRanges(startMs: number, endMs: number): ClipRange[] {
   if (duration <= MIN_CLIP_DURATION_MS)
     return [{ startMs, endMs }];
   const minimumCount = Math.max(1, Math.ceil(duration / MAX_CLIP_DURATION_MS));
-  const count = Math.max(
-    minimumCount,
-    Math.round(duration / TARGET_CLIP_DURATION_MS),
+  const maximumCount = Math.max(1, Math.floor(duration / MIN_CLIP_DURATION_MS));
+  const count = Math.min(
+    maximumCount,
+    Math.max(minimumCount, Math.round(duration / TARGET_CLIP_DURATION_MS)),
   );
   return Array.from({ length: count }, (_, index) => ({
     startMs: startMs + Math.round((duration * index) / count),
@@ -948,21 +960,6 @@ function buildTopicParts(
       });
     }
   };
-  const appendFallback = (startMs: number, endMs: number): void => {
-    appendParts(
-      {
-        title: "Additional discussion",
-        summary: "Additional discussion from the source transcript.",
-        startMs,
-        endMs,
-        confidence: 0.35,
-        subtopics: [],
-      },
-      [],
-      startMs,
-      endMs,
-    );
-  };
   for (const topic of topics.slice(0, 50)) {
     const rawStart = finiteMilliseconds(topic.startMs);
     const rawEnd = finiteMilliseconds(topic.endMs);
@@ -974,10 +971,6 @@ function buildTopicParts(
       startMs,
       Math.min(sourceDurationMs, rawEnd ?? startMs + minimumTopicDuration),
     );
-    if (startMs > cursor) {
-      if (startMs - cursor >= minimumTopicDuration) appendFallback(cursor, startMs);
-      else startMs = cursor;
-    }
     if (endMs - startMs < minimumTopicDuration)
       endMs = Math.min(sourceDurationMs, startMs + minimumTopicDuration);
     if (endMs <= startMs) continue;
@@ -988,7 +981,6 @@ function buildTopicParts(
     cursor = endMs;
     if (cursor >= sourceDurationMs) break;
   }
-  if (cursor < sourceDurationMs) appendFallback(cursor, sourceDurationMs);
   return parts.filter((part) => part.endMs > part.startMs);
 }
 
@@ -1059,7 +1051,21 @@ async function persistAnalysis(
         );
         return [{ child, range }];
       });
-      const normalizedChildren = fillClipGaps(startMs, endMs, candidates);
+      const normalizedChildren = fillClipGaps(startMs, endMs, candidates).filter(
+        ({ child, range }) => {
+          const hasMeaningfulLabel = Boolean(
+            readableAnalysisText(child.title) ||
+              readableAnalysisText(child.summary),
+          );
+          if (hasMeaningfulLabel) return true;
+          const excerpt = transcriptExcerpt(
+            transcriptSegments,
+            range.startMs,
+            range.endMs,
+          );
+          return excerpt.split(/\s+/).filter(Boolean).length >= 4;
+        },
+      );
       validateClipBounds(startMs, endMs, source.duration_ms);
       const topicId = id();
       const topicExcerpt = transcriptExcerpt(
@@ -1109,7 +1115,7 @@ async function persistAnalysis(
         const childTitle =
           readableAnalysisText(child.title) ||
           readableAnalysisText(child.summary) ||
-          childExcerpt ||
+          transcriptTitle(childExcerpt) ||
           displayedTopicTitle;
         const childSummary =
           readableAnalysisText(child.summary) || childExcerpt || null;
@@ -1231,7 +1237,7 @@ async function runJob(
         {
           schemaName: "video_topic_tree",
           system:
-            "Return JSON matching the requested schema. Identify broad semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. A topic is a meaningful section of the discussion, not a single sentence or a few-second fragment; when the transcript supports it, make topics at least about 60 seconds long and avoid topics that span unrelated parts of the video. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Every clip must be completely inside its parent topic range; set each topic range to contain all of its clips. Prefer coherent clips of about 90 to 180 seconds, targeting roughly 2 minutes, and never return isolated 1 to 4 second fragments. Within a topic, return enough distinct clips to cover the meaningful discussion instead of only the first and last sentence; do not leave very large unexplained gaps. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1 or Clip 1. Do not invent unsupported claims.",
+            "Return JSON matching the requested schema. Identify broad semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. A topic is a meaningful section of the discussion, not a single sentence or a few-second fragment; when the transcript supports it, make topics roughly 5 to 15 minutes long and avoid topics that span unrelated parts of the video. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Every clip must be completely inside its parent topic range; set each topic range to contain all of its clips. Prefer coherent clips of at least 2 minutes and about 2 minutes when possible, never return isolated 1 to 4 second fragments. Within a topic, return enough distinct clips to cover the meaningful discussion instead of only the first and last sentence; do not leave very large unexplained gaps. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1, Clip 1, or Additional discussion. Do not invent unsupported claims.",
           user: `Source duration: ${source.duration_ms}ms\nTranscript:\n${prompt}`,
         },
       );
