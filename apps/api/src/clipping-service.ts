@@ -49,9 +49,11 @@ type ClipJobType =
   | "subtopic_detection"
   | "render_batch";
 const CLIPPING_AUDIO_FILENAME = "audio-16k.mp3";
-const MIN_CLIP_DURATION_MS = 15_000;
-const MAX_CLIP_DURATION_MS = 90_000;
+const MIN_CLIP_DURATION_MS = 90_000;
+const TARGET_CLIP_DURATION_MS = 120_000;
+const MAX_CLIP_DURATION_MS = 180_000;
 const MIN_TOPIC_DURATION_MS = 60_000;
+const MAX_TOPIC_DURATION_MS = 15 * 60_000;
 
 function offsetTranscript(transcript: NormalizedTranscript, offsetMs: number): NormalizedTranscript {
   const offsetWord = (word: NormalizedTranscriptWord): NormalizedTranscriptWord => ({
@@ -821,29 +823,173 @@ function transcriptExcerpt(
     .slice(0, 200);
 }
 
-function normalizeClipRange(
+type AnalysisTopic = NonNullable<AnalysisResponse["topics"]>[number];
+type AnalysisChild = NonNullable<AnalysisTopic["subtopics"]>[number];
+type ClipRange = { startMs: number; endMs: number };
+type TopicPart = {
+  topic: AnalysisTopic;
+  children: AnalysisChild[];
+  startMs: number;
+  endMs: number;
+  partNumber: number;
+  partCount: number;
+};
+
+function normalizeClipRangeWithin(
   startMs: number,
   endMs: number,
-  durationMs: number,
-): { startMs: number; endMs: number } {
-  const duration = Math.max(1, Math.round(durationMs));
-  let start = Math.max(0, Math.min(duration, Math.round(startMs)));
-  let end = Math.max(0, Math.min(duration, Math.round(endMs)));
-  if (end <= start) end = Math.min(duration, start + MIN_CLIP_DURATION_MS);
-  if (end <= start) start = Math.max(0, end - MIN_CLIP_DURATION_MS);
+  lowerBoundMs: number,
+  upperBoundMs: number,
+): ClipRange {
+  const lowerBound = Math.max(0, Math.round(lowerBoundMs));
+  const upperBound = Math.max(lowerBound + 1, Math.round(upperBoundMs));
+  let start = Math.max(lowerBound, Math.min(upperBound, Math.round(startMs)));
+  let end = Math.max(lowerBound, Math.min(upperBound, Math.round(endMs)));
+  if (end <= start) end = Math.min(upperBound, start + MIN_CLIP_DURATION_MS);
+  if (end <= start) start = Math.max(lowerBound, end - MIN_CLIP_DURATION_MS);
+  const availableDuration = upperBound - lowerBound;
+  if (availableDuration <= MIN_CLIP_DURATION_MS)
+    return { startMs: start, endMs: Math.max(start + 1, end) };
   const targetDuration = Math.min(
-    duration,
+    availableDuration,
     Math.max(MIN_CLIP_DURATION_MS, Math.min(MAX_CLIP_DURATION_MS, end - start)),
   );
   const center = (start + end) / 2;
   const normalizedStart = Math.max(
-    0,
-    Math.min(duration - targetDuration, Math.round(center - targetDuration / 2)),
+    lowerBound,
+    Math.min(
+      upperBound - targetDuration,
+      Math.round(center - targetDuration / 2),
+    ),
   );
   return {
     startMs: normalizedStart,
     endMs: normalizedStart + targetDuration,
   };
+}
+
+function fallbackClipRanges(startMs: number, endMs: number): ClipRange[] {
+  const duration = Math.max(0, endMs - startMs);
+  if (!duration) return [];
+  if (duration <= MIN_CLIP_DURATION_MS)
+    return [{ startMs, endMs }];
+  const minimumCount = Math.max(1, Math.ceil(duration / MAX_CLIP_DURATION_MS));
+  const count = Math.max(
+    minimumCount,
+    Math.round(duration / TARGET_CLIP_DURATION_MS),
+  );
+  return Array.from({ length: count }, (_, index) => ({
+    startMs: startMs + Math.round((duration * index) / count),
+    endMs: startMs + Math.round((duration * (index + 1)) / count),
+  })).filter((range) => range.endMs > range.startMs);
+}
+
+function fallbackChild(range: ClipRange): AnalysisChild {
+  return {
+    title: "",
+    summary: "",
+    startMs: range.startMs,
+    endMs: range.endMs,
+    confidence: 0.35,
+  };
+}
+
+function fillClipGaps(
+  startMs: number,
+  endMs: number,
+  candidates: Array<{ child: AnalysisChild; range: ClipRange }>,
+): Array<{ child: AnalysisChild; range: ClipRange }> {
+  const sorted = candidates
+    .slice()
+    .sort((left, right) => left.range.startMs - right.range.startMs);
+  if (!sorted.length)
+    return fallbackClipRanges(startMs, endMs).map((range) => ({
+      child: fallbackChild(range),
+      range,
+    }));
+  const result: Array<{ child: AnalysisChild; range: ClipRange }> = [];
+  let cursor = startMs;
+  for (const candidate of sorted) {
+    if (candidate.range.startMs - cursor >= 15_000)
+      for (const range of fallbackClipRanges(cursor, candidate.range.startMs))
+        result.push({ child: fallbackChild(range), range });
+    result.push(candidate);
+    cursor = Math.max(cursor, candidate.range.endMs);
+  }
+  if (endMs - cursor >= 15_000)
+    for (const range of fallbackClipRanges(cursor, endMs))
+      result.push({ child: fallbackChild(range), range });
+  return result.slice(0, 30);
+}
+
+function buildTopicParts(
+  topics: AnalysisTopic[],
+  sourceDurationMs: number,
+): TopicPart[] {
+  const parts: TopicPart[] = [];
+  const minimumTopicDuration = Math.min(sourceDurationMs, MIN_TOPIC_DURATION_MS);
+  let cursor = 0;
+  const appendParts = (
+    topic: AnalysisTopic,
+    children: AnalysisChild[],
+    startMs: number,
+    endMs: number,
+  ): void => {
+    const duration = Math.max(1, endMs - startMs);
+    const partCount = Math.max(1, Math.ceil(duration / MAX_TOPIC_DURATION_MS));
+    for (let index = 0; index < partCount; index += 1) {
+      parts.push({
+        topic,
+        children,
+        startMs: startMs + Math.round((duration * index) / partCount),
+        endMs: startMs + Math.round((duration * (index + 1)) / partCount),
+        partNumber: index + 1,
+        partCount,
+      });
+    }
+  };
+  const appendFallback = (startMs: number, endMs: number): void => {
+    appendParts(
+      {
+        title: "Additional discussion",
+        summary: "Additional discussion from the source transcript.",
+        startMs,
+        endMs,
+        confidence: 0.35,
+        subtopics: [],
+      },
+      [],
+      startMs,
+      endMs,
+    );
+  };
+  for (const topic of topics.slice(0, 50)) {
+    const rawStart = finiteMilliseconds(topic.startMs);
+    const rawEnd = finiteMilliseconds(topic.endMs);
+    let startMs = Math.max(
+      cursor,
+      Math.min(sourceDurationMs, rawStart ?? cursor),
+    );
+    let endMs = Math.max(
+      startMs,
+      Math.min(sourceDurationMs, rawEnd ?? startMs + minimumTopicDuration),
+    );
+    if (startMs > cursor) {
+      if (startMs - cursor >= minimumTopicDuration) appendFallback(cursor, startMs);
+      else startMs = cursor;
+    }
+    if (endMs - startMs < minimumTopicDuration)
+      endMs = Math.min(sourceDurationMs, startMs + minimumTopicDuration);
+    if (endMs <= startMs) continue;
+    const children = Array.isArray(topic.subtopics)
+      ? topic.subtopics
+      : [];
+    appendParts(topic, children, startMs, endMs);
+    cursor = endMs;
+    if (cursor >= sourceDurationMs) break;
+  }
+  if (cursor < sourceDurationMs) appendFallback(cursor, sourceDurationMs);
+  return parts.filter((part) => part.endMs > part.startMs);
 }
 
 async function persistAnalysis(
@@ -873,6 +1019,7 @@ async function persistAnalysis(
     .all(transcript.id) as Row[];
   const sourceDurationMs = Math.max(1, Number(source.duration_ms));
   const timestamp = now();
+  const topicParts = buildTopicParts(topics, sourceDurationMs);
   db.transaction(() => {
     db.prepare("DELETE FROM video_topics WHERE source_id = ?").run(source.id);
     const insertTopic = db.prepare(
@@ -884,88 +1031,35 @@ async function persistAnalysis(
     const insertSelection = db.prepare(
       "INSERT INTO clip_selections(id, content_id, subtopic_id, selected, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
     );
-    topics.slice(0, 50).forEach((topic, topicIndex) => {
-      const children =
-        Array.isArray(topic.subtopics) && topic.subtopics.length
-          ? topic.subtopics
-          : [
-              {
-                title: topic.title,
-                summary: topic.summary,
-                startMs: topic.startMs,
-                endMs: topic.endMs,
-                confidence: topic.confidence,
-              },
-            ];
-      const partitionStart = Math.round(
-        (sourceDurationMs * topicIndex) / topics.length,
-      );
-      const partitionEnd = Math.round(
-        (sourceDurationMs * (topicIndex + 1)) / topics.length,
-      );
-      const rawTopicStart = finiteMilliseconds(topic.startMs);
-      const rawTopicEnd = finiteMilliseconds(topic.endMs);
-      const normalizedChildren = children.slice(0, 30).map((child) => {
+    topicParts.forEach((part, topicIndex) => {
+      const topic = part.topic;
+      const startMs = part.startMs;
+      const endMs = part.endMs;
+      const sourceChildren = part.children.length
+        ? part.children
+        : [
+            {
+              title: topic.title,
+              summary: topic.summary,
+              startMs: topic.startMs,
+              endMs: topic.endMs,
+              confidence: topic.confidence,
+            },
+          ];
+      const candidates = sourceChildren.slice(0, 30).flatMap((child) => {
         const rawChildStart =
-          finiteMilliseconds(child.startMs) ??
-          rawTopicStart ??
-          partitionStart;
-        const rawChildEnd =
-          finiteMilliseconds(child.endMs) ?? rawTopicEnd ?? partitionEnd;
-        return {
-          child,
-          range: normalizeClipRange(
-            rawChildStart,
-            rawChildEnd,
-            sourceDurationMs,
-          ),
-        };
-      });
-      const childRanges = normalizedChildren.map(({ range }) => range);
-      const inferredStart = childRanges.length
-        ? Math.min(...childRanges.map((range) => range.startMs))
-        : undefined;
-      const inferredEnd = childRanges.length
-        ? Math.max(...childRanges.map((range) => range.endMs))
-        : undefined;
-      const wholeSourceRange =
-        rawTopicStart !== undefined &&
-        rawTopicEnd !== undefined &&
-        rawTopicStart <= 0 &&
-        rawTopicEnd >= sourceDurationMs;
-      let startMs = rawTopicStart ?? partitionStart;
-      let endMs = rawTopicEnd ?? partitionEnd;
-      if (inferredStart !== undefined)
-        startMs =
-          rawTopicStart === undefined || wholeSourceRange
-            ? inferredStart
-            : Math.min(startMs, inferredStart);
-      if (inferredEnd !== undefined)
-        endMs =
-          rawTopicEnd === undefined || wholeSourceRange
-            ? inferredEnd
-            : Math.max(endMs, inferredEnd);
-      startMs = Math.max(0, Math.min(sourceDurationMs, startMs));
-      endMs = Math.max(0, Math.min(sourceDurationMs, endMs));
-      if (endMs <= startMs) {
-        startMs = partitionStart;
-        endMs = Math.max(startMs + 1, partitionEnd);
-      }
-      const minimumTopicDuration = Math.min(
-        sourceDurationMs,
-        MIN_TOPIC_DURATION_MS,
-      );
-      if (endMs - startMs < minimumTopicDuration) {
-        const center = (startMs + endMs) / 2;
-        startMs = Math.max(
-          0,
-          Math.min(
-            sourceDurationMs - minimumTopicDuration,
-            Math.round(center - minimumTopicDuration / 2),
-          ),
+          finiteMilliseconds(child.startMs) ?? startMs;
+        const rawChildEnd = finiteMilliseconds(child.endMs) ?? endMs;
+        if (rawChildEnd <= startMs || rawChildStart >= endMs) return [];
+        const range = normalizeClipRangeWithin(
+          rawChildStart,
+          rawChildEnd,
+          startMs,
+          endMs,
         );
-        endMs = startMs + minimumTopicDuration;
-      }
+        return [{ child, range }];
+      });
+      const normalizedChildren = fillClipGaps(startMs, endMs, candidates);
       validateClipBounds(startMs, endMs, source.duration_ms);
       const topicId = id();
       const topicExcerpt = transcriptExcerpt(
@@ -978,13 +1072,17 @@ async function persistAnalysis(
         readableAnalysisText(topic.summary) ||
         topicExcerpt ||
         "Key discussion";
+      const displayedTopicTitle =
+        part.partCount > 1
+          ? `${topicTitle} · Part ${part.partNumber}`
+          : topicTitle;
       const topicSummary =
         readableAnalysisText(topic.summary) || topicExcerpt || null;
       insertTopic.run(
         topicId,
         source.id,
         topicIndex,
-        topicTitle,
+        displayedTopicTitle,
         topicSummary,
         startMs,
         endMs,
@@ -1012,7 +1110,7 @@ async function persistAnalysis(
           readableAnalysisText(child.title) ||
           readableAnalysisText(child.summary) ||
           childExcerpt ||
-          topicTitle;
+          displayedTopicTitle;
         const childSummary =
           readableAnalysisText(child.summary) || childExcerpt || null;
         insertSubtopic.run(
@@ -1133,7 +1231,7 @@ async function runJob(
         {
           schemaName: "video_topic_tree",
           system:
-            "Return JSON matching the requested schema. Identify broad semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. A topic is a meaningful section of the discussion, not a single sentence or a few-second fragment; when the transcript supports it, make topics at least about 60 seconds long. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Every clip must be completely inside its parent topic range; set each topic range to contain all of its clips. Use coherent passages of roughly 15 to 90 seconds for clips, never isolated sentences or 1 to 4 second fragments. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1 or Clip 1. Do not invent unsupported claims.",
+            "Return JSON matching the requested schema. Identify broad semantic main topics and clip-worthy subtopics from the timestamped spoken transcript. A topic is a meaningful section of the discussion, not a single sentence or a few-second fragment; when the transcript supports it, make topics at least about 60 seconds long and avoid topics that span unrelated parts of the video. Every topic needs a meaningful title, summary, startMs, and endMs. Every clip needs a meaningful title, summary, startMs, and endMs. Every clip must be completely inside its parent topic range; set each topic range to contain all of its clips. Prefer coherent clips of about 90 to 180 seconds, targeting roughly 2 minutes, and never return isolated 1 to 4 second fragments. Within a topic, return enough distinct clips to cover the meaningful discussion instead of only the first and last sentence; do not leave very large unexplained gaps. Use transcript timestamps, keep all ranges inside the source duration, and do not use generic labels such as Topic 1 or Clip 1. Do not invent unsupported claims.",
           user: `Source duration: ${source.duration_ms}ms\nTranscript:\n${prompt}`,
         },
       );
