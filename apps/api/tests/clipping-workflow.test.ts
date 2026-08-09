@@ -122,7 +122,15 @@ describe("clipping workflow integration", () => {
       payload: video,
     });
     expect(uploaded.statusCode).toBe(201);
+    const sourceId = uploaded.json().source.id as string;
     expect(uploaded.json().source.durationMs).toBeGreaterThan(0);
+    const preview = await app.inject({
+      method: "GET",
+      url: `/api/clipping/source/${sourceId}/preview?startMs=500&endMs=1500`,
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.headers["content-type"]).toContain("video/mp4");
+    expect(preview.body.length).toBeGreaterThan(0);
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

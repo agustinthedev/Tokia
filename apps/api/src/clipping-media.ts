@@ -201,6 +201,8 @@ export async function renderPreviewSegment(options: {
     "128k",
     "-movflags",
     "+faststart",
+    "-f",
+    "mp4",
     options.outputPath,
   ]);
 }
