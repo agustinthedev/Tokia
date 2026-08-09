@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { promises as fsp } from "node:fs";
 import path from "node:path";
 import Fastify, {
   type FastifyInstance,
@@ -79,6 +80,7 @@ import {
   uploadSource,
 } from "./clipping-service.js";
 import { MediaProcessingError } from "./content-media.js";
+import { renderPreviewSegment } from "./clipping-media.js";
 
 type AppSettings = typeof defaultConfig;
 type QueryRecord = Record<string, string | undefined>;
@@ -3127,6 +3129,50 @@ export async function buildApp(
         "SOURCE_NOT_FOUND",
         "Source video is not available.",
       );
+    const query = request.query as QueryRecord;
+    const startMs = Number(query.startMs);
+    const endMs = Number(query.endMs);
+    if (
+      Number.isFinite(startMs) &&
+      Number.isFinite(endMs) &&
+      startMs >= 0 &&
+      endMs > startMs &&
+      startMs < Number(row.duration_ms)
+    ) {
+      const boundedStartMs = Math.max(0, Math.round(startMs));
+      const boundedEndMs = Math.min(
+        Number(row.duration_ms),
+        Math.round(endMs),
+      );
+      const previewDirectory = path.join(
+        path.dirname(String(row.source_path)),
+        ".previews",
+      );
+      const previewPath = path.join(
+        previewDirectory,
+        `${sourceId}-${boundedStartMs}-${boundedEndMs}.mp4`,
+      );
+      if (!fs.existsSync(previewPath)) {
+        await fsp.mkdir(previewDirectory, { recursive: true });
+        const temporaryPath = `${previewPath}.${process.pid}.tmp`;
+        try {
+          await renderPreviewSegment({
+            ffmpegPath: settings.ffmpegPath,
+            sourcePath: String(row.source_path),
+            outputPath: temporaryPath,
+            startMs: boundedStartMs,
+            endMs: boundedEndMs,
+          });
+          await fsp.rename(temporaryPath, previewPath);
+        } finally {
+          await fsp.rm(temporaryPath, { force: true });
+        }
+      }
+      return reply
+        .type("video/mp4")
+        .header("Cache-Control", "private, max-age=3600")
+        .send(fs.createReadStream(previewPath));
+    }
     return reply
       .type(String(row.mime_type))
       .send(fs.createReadStream(String(row.source_path)));

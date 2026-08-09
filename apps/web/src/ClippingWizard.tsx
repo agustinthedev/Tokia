@@ -1,7 +1,6 @@
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactElement,
   type ReactNode,
@@ -88,7 +87,6 @@ export function ClippingWizard({
   const [previewCandidate, setPreviewCandidate] = useState<AnyRecord | null>(
     null,
   );
-  const previewRef = useRef<HTMLVideoElement | null>(null);
   const [settings, setSettings] = useState<AnyRecord>(defaultSettings);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -155,49 +153,6 @@ export function ClippingWizard({
     setCurrentClip((value) => value ?? current.subtopicId);
     setSettings(current.settings ?? defaultSettings);
   }, [current?.subtopicId, current?.settings?.fingerprint]);
-  useEffect(() => {
-    const video = previewRef.current;
-    if (!video || !previewCandidate) return;
-    const startSeconds = Number(previewCandidate.startMs ?? 0) / 1000;
-    const endSeconds = Number(previewCandidate.endMs ?? 0) / 1000;
-    const seekToCandidateStart = (): void => {
-      if (!Number.isFinite(startSeconds) || video.readyState < 1) return;
-      video.pause();
-      video.currentTime = startSeconds;
-    };
-    const startCandidatePlayback = (): void => {
-      seekToCandidateStart();
-      void video.play().catch(() => undefined);
-    };
-    const keepCandidateBounds = (): void => {
-      if (endSeconds <= startSeconds || video.readyState < 1) return;
-      if (video.currentTime < startSeconds) {
-        video.currentTime = startSeconds;
-        return;
-      }
-      if (video.currentTime >= endSeconds) {
-        video.pause();
-        video.currentTime = endSeconds;
-      }
-    };
-    video.addEventListener("loadedmetadata", seekToCandidateStart);
-    video.addEventListener("loadeddata", startCandidatePlayback);
-    video.addEventListener("timeupdate", keepCandidateBounds);
-    const seekTimer = window.setTimeout(startCandidatePlayback, 0);
-    const boundsTimer = window.setInterval(keepCandidateBounds, 100);
-    return () => {
-      video.removeEventListener("loadedmetadata", seekToCandidateStart);
-      video.removeEventListener("loadeddata", startCandidatePlayback);
-      video.removeEventListener("timeupdate", keepCandidateBounds);
-      window.clearTimeout(seekTimer);
-      window.clearInterval(boundsTimer);
-    };
-  }, [
-    previewCandidate?.id,
-    previewCandidate?.startMs,
-    previewCandidate?.endMs,
-    state?.source?.id,
-  ]);
   const ensureDraft = async (): Promise<string> => {
     if (contentId) return contentId;
     const draft = await api<AnyRecord>(`/api/projects/${project.id}/content`, {
@@ -1109,13 +1064,11 @@ export function ClippingWizard({
                 </button>
               </header>
               <video
-                ref={previewRef}
                 key={previewCandidate.id}
                 className="clipping-preview-video"
                 controls
-                autoPlay
-                preload="metadata"
-                src={`${API_BASE}/api/clipping/source/${state.source.id}/preview`}
+                preload="auto"
+                src={`${API_BASE}/api/clipping/source/${state.source.id}/preview?startMs=${encodeURIComponent(String(previewCandidate.startMs))}&endMs=${encodeURIComponent(String(previewCandidate.endMs))}`}
               />
               <div className="clipping-preview-meta">
                 <strong>

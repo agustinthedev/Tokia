@@ -168,6 +168,43 @@ export async function extractAudioSegment(
   ]);
 }
 
+export async function renderPreviewSegment(options: {
+  ffmpegPath: string;
+  sourcePath: string;
+  outputPath: string;
+  startMs: number;
+  endMs: number;
+}): Promise<void> {
+  const startMs = Math.max(0, Math.round(options.startMs));
+  const durationMs = Math.max(1, Math.round(options.endMs) - startMs);
+  await runTool(options.ffmpegPath, [
+    "-y",
+    "-ss",
+    String(startMs / 1000),
+    "-i",
+    options.sourcePath,
+    "-t",
+    String(durationMs / 1000),
+    "-map",
+    "0:v:0",
+    "-map",
+    "0:a:0?",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "23",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    options.outputPath,
+  ]);
+}
+
 function filterPath(value: string): string {
   return value
     .replaceAll("\\", "/")
