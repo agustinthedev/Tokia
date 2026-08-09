@@ -8,13 +8,19 @@ import {
   assignmentSnapshot,
   hasRequiredCapability,
   normalizeProviderError,
+  OPENAI_TRANSCRIPTION_CHUNK_DURATION_MS,
+  OPENAI_TRANSCRIPTION_MAX_BYTES,
   preflight,
   structuredAnalysis,
   touchRequest,
   transcribe,
   transcriptionModelForClipping,
+  type NormalizedTranscript,
+  type NormalizedTranscriptSegment,
+  type NormalizedTranscriptWord,
 } from "./ai-providers.js";
 import {
+  extractAudioSegment,
   fileMetadata,
   extractAudio,
   probeMedia,
@@ -46,6 +52,72 @@ const CLIPPING_AUDIO_FILENAME = "audio-16k.mp3";
 const MIN_CLIP_DURATION_MS = 15_000;
 const MAX_CLIP_DURATION_MS = 90_000;
 const MIN_TOPIC_DURATION_MS = 60_000;
+
+function offsetTranscript(transcript: NormalizedTranscript, offsetMs: number): NormalizedTranscript {
+  const offsetWord = (word: NormalizedTranscriptWord): NormalizedTranscriptWord => ({
+    ...word,
+    startMs: word.startMs + offsetMs,
+    endMs: word.endMs + offsetMs,
+  });
+  const segments: NormalizedTranscriptSegment[] = transcript.segments.map((segment) => ({
+    ...segment,
+    startMs: segment.startMs + offsetMs,
+    endMs: segment.endMs + offsetMs,
+    words: segment.words.map(offsetWord),
+  }));
+  return {
+    ...transcript,
+    segments,
+    words: transcript.words.map(offsetWord),
+  };
+}
+
+function mergeTranscripts(transcripts: NormalizedTranscript[]): NormalizedTranscript {
+  return {
+    text: transcripts.map((transcript) => transcript.text).filter(Boolean).join(" ").trim(),
+    language: transcripts.find((transcript) => transcript.language)?.language,
+    segments: transcripts.flatMap((transcript) => transcript.segments).sort((left, right) => left.startMs - right.startMs),
+    words: transcripts.flatMap((transcript) => transcript.words).sort((left, right) => left.startMs - right.startMs),
+    wordTimestamps: transcripts.some((transcript) => transcript.wordTimestamps),
+  };
+}
+
+async function transcribeAudio(
+  provider: Row,
+  masterSecret: string,
+  audioPath: string,
+  audioDurationMs: number,
+  ffmpegPath: string,
+  workingDirectory: string,
+  onProgress: (progress: number) => void,
+): Promise<NormalizedTranscript> {
+  const meta = await fileMetadata(audioPath);
+  if (provider.provider_type !== "openai" || meta.size <= OPENAI_TRANSCRIPTION_MAX_BYTES) {
+    return transcribe(provider, masterSecret, audioPath, audioDurationMs);
+  }
+
+  const durationMs = Math.max(1, audioDurationMs);
+  const chunkCount = Math.ceil(durationMs / OPENAI_TRANSCRIPTION_CHUNK_DURATION_MS);
+  const chunkDirectory = path.join(workingDirectory, "transcription-chunks");
+  await fsp.rm(chunkDirectory, { recursive: true, force: true });
+  await fsp.mkdir(chunkDirectory, { recursive: true });
+  const transcripts: NormalizedTranscript[] = [];
+  try {
+    for (let index = 0; index < chunkCount; index += 1) {
+      const startMs = index * OPENAI_TRANSCRIPTION_CHUNK_DURATION_MS;
+      const chunkDurationMs = Math.min(OPENAI_TRANSCRIPTION_CHUNK_DURATION_MS, durationMs - startMs);
+      const chunkPath = path.join(chunkDirectory, `chunk-${String(index + 1).padStart(4, "0")}.mp3`);
+      await extractAudioSegment(ffmpegPath, audioPath, chunkPath, startMs, chunkDurationMs);
+      const chunk = await transcribe(provider, masterSecret, chunkPath, chunkDurationMs);
+      transcripts.push(offsetTranscript(chunk, startMs));
+      onProgress(35 + Math.round(((index + 1) / chunkCount) * 20));
+    }
+    return mergeTranscripts(transcripts);
+  } finally {
+    await fsp.rm(chunkDirectory, { recursive: true, force: true });
+  }
+}
+
 function id(): string {
   return crypto.randomUUID();
 }
@@ -1000,11 +1072,14 @@ async function runJob(
     const audioPath = path.join(directory, CLIPPING_AUDIO_FILENAME);
     const started = Date.now();
     try {
-      const result = await transcribe(
+      const result = await transcribeAudio(
         provider,
         settings.secretsEncryptionKey,
         audioPath,
         source.duration_ms,
+        settings.ffmpegPath,
+        directory,
+        (progress) => update("transcribing", progress),
       );
       const meta = await fileMetadata(audioPath);
       await persistTranscript(db, source, provider, result, meta.sha256);

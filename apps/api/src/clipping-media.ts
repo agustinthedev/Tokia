@@ -140,6 +140,34 @@ export async function extractAudio(
   ]);
 }
 
+export async function extractAudioSegment(
+  ffmpegPath: string,
+  sourcePath: string,
+  outputPath: string,
+  startMs: number,
+  durationMs: number,
+): Promise<void> {
+  await runTool(ffmpegPath, [
+    "-y",
+    "-ss",
+    String(Math.max(0, startMs) / 1000),
+    "-i",
+    sourcePath,
+    "-t",
+    String(Math.max(1, durationMs) / 1000),
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-c:a",
+    "libmp3lame",
+    "-b:a",
+    "64k",
+    outputPath,
+  ]);
+}
+
 function filterPath(value: string): string {
   return value
     .replaceAll("\\", "/")
