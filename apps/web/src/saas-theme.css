@@ -87,7 +87,8 @@ textarea:focus-visible {
 
 /* Application shell */
 .app-shell {
-  width: min(calc(100vw - 32px), 1680px);
+  width: calc(100vw - 32px);
+  max-width: none;
   height: calc(100vh - 32px);
   min-height: 0;
   margin: 16px auto;
