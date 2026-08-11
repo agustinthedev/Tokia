@@ -2687,6 +2687,8 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   });
   const [content, setContent] = useState<ContentDetail | null>(null);
   const [durationDrafts, setDurationDrafts] = useState<Record<string, string>>({});
+  const [bulkDurationDraft, setBulkDurationDraft] = useState("2.5");
+  const [previewPolling, setPreviewPolling] = useState(false);
   const captionDraft = useRef("");
   const captionContentId = useRef<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
@@ -2717,9 +2719,14 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   };
   const refreshContent = async (id = content?.id) => {
     if (!id) return;
-    const updated = await request<ContentDetail>(`/api/content/${id}`);
-    setContent(updated);
-    return updated;
+    try {
+      const updated = await request<ContentDetail>(`/api/content/${id}`);
+      setContent(updated);
+      return updated;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not refresh content status");
+      return undefined;
+    }
   };
   useEffect(() => {
     if (!existingId) return;
@@ -2731,6 +2738,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         setType(loaded.type);
         setConfig(loaded.configuration);
         setSelectedCollections(loaded.configuration.sourceCollectionIds ?? []);
+        setPreviewPolling(loaded.status === "preview_generating" || loaded.jobs.some((job) => job.jobType === "preview_render" && ["queued", "running"].includes(job.status)));
         const persistedStep = Number(loaded.wizardStep);
         const fallbackStep = loaded.narrative || loaded.frames.some((frame) => frame.sourceMedia) ? 4 : 1;
         setStep(
@@ -2747,6 +2755,11 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       active = false;
     };
   }, [existingId]);
+  useEffect(() => {
+    if (type === "video_slideshow") {
+      setBulkDurationDraft(String(config.video?.secondsPerImage ?? 2.5));
+    }
+  }, [type, config.video?.secondsPerImage]);
   const persistStep = async (nextStep: number, id = content?.id): Promise<void> => {
     const boundedStep = Math.max(1, Math.min(7, Math.round(nextStep)));
     setStep(boundedStep);
@@ -2759,12 +2772,18 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   };
   const hasActiveTextJob = content?.jobs?.some((job) => ["narrative_generation", "caption_regeneration", "frame_regeneration"].includes(job.jobType) && ["queued", "running"].includes(job.status)) ?? false;
   useEffect(() => {
-    if (!content || (!hasActiveTextJob && !["preview_generating", "generation_queued", "generating"].includes(content.status))) return;
+    const hasActivePreviewJob = content?.jobs?.some((job) => job.jobType === "preview_render" && ["queued", "running"].includes(job.status)) ?? false;
+    const isPreviewTerminal = content && ["preview_ready", "failed", "ready"].includes(content.status);
+    if (previewPolling && isPreviewTerminal) {
+      setPreviewPolling(false);
+      return;
+    }
+    if (!content || (!hasActiveTextJob && !hasActivePreviewJob && !previewPolling && !["preview_generating", "generation_queued", "generating"].includes(content.status))) return;
     const timer = window.setInterval(() => {
       void refreshContent();
     }, 900);
     return () => window.clearInterval(timer);
-  }, [content?.id, content?.status, content?.jobs?.length, content?.jobs?.[0]?.status, hasActiveTextJob]);
+  }, [content?.id, content?.status, content?.jobs?.length, content?.jobs?.[0]?.status, hasActiveTextJob, previewPolling]);
   useEffect(() => {
     if (content && captionContentId.current !== content.id) {
       captionContentId.current = content.id;
@@ -2971,6 +2990,35 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       setError(caught instanceof Error ? caught.message : "Could not save frame duration");
     }
   };
+  const applyUnlockedImageDuration = async () => {
+    if (!content || type !== "video_slideshow") return;
+    const value = Number(bulkDurationDraft);
+    const targetCount = content.frames.filter((frame) => frame.sourceMedia?.mediaType === "image" && !frame.imageLocked).length;
+    if (!Number.isFinite(value)) {
+      setError("Enter a valid duration in seconds.");
+      return;
+    }
+    if (!targetCount) {
+      setNotice("There are no unlocked image frames to update.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      setContent(
+        await request<ContentDetail>(`/api/content/${content.id}/frames/duration`, {
+          method: "PATCH",
+          body: JSON.stringify({ durationSeconds: value }),
+        }),
+      );
+      setDirty(false);
+      setNotice(`Applied ${value.toFixed(2)}s to ${targetCount} unlocked image ${targetCount === 1 ? "frame" : "frames"}.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not apply image duration");
+    } finally {
+      setSaving(false);
+    }
+  };
   const generateCopy = async () => {
     if (!content) return;
     setSaving(true);
@@ -3053,10 +3101,30 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
     try {
       const result = await request<{ content: ContentDetail; job: AnyRecord }>(`/api/content/${content.id}/preview`, { method: "POST", body: JSON.stringify({}) });
       setContent(result.content);
+      setPreviewPolling(true);
       setDirty(false);
       setNotice("Preview is rendering locally.");
     } catch (caught) {
+      setPreviewPolling(false);
       setError(caught instanceof Error ? caught.message : "Could not generate preview");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const retryPreview = async () => {
+    if (!content) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await request<{ content: ContentDetail; job: AnyRecord }>(`/api/content/${content.id}/retry`, {
+        method: "POST",
+        body: JSON.stringify({ jobType: "preview_render" }),
+      });
+      setContent(result.content);
+      setPreviewPolling(true);
+      setNotice("Preview is rendering locally.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not retry preview");
     } finally {
       setSaving(false);
     }
@@ -3095,6 +3163,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         ];
   const contentSlides = type === "single_image" ? 1 : Math.max(0, Number(config.totalFrames) - Number(Boolean(config.includeCover)) - Number(Boolean(config.includeCta)));
   const previewAsset = content?.assets.find((asset) => asset.variant === "preview" && asset.assetType === (content.type === "video_slideshow" ? "video" : "image"));
+  const previewJob = content?.jobs.find((job) => job.jobType === "preview_render");
   const stepLabels = ["Type", "Sources", "Structure", "Content", "Visuals", "Text", "Preview"];
   return (
     <>
@@ -3242,6 +3311,28 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               </select>
             </label>
           </div>
+          {type === "video_slideshow" && (
+            <div className="video-controls">
+              <div className="eyebrow">Video slideshow timing</div>
+              <label className="form-field">
+                <span>Default duration for images</span>
+                <input
+                  type="number"
+                  min="0.1"
+                  max="30"
+                  step="0.05"
+                  value={config.video?.secondsPerImage ?? 2.5}
+                  onChange={(event) =>
+                    updateConfig("video", {
+                      ...config.video,
+                      secondsPerImage: Number(event.target.value),
+                    })
+                  }
+                />
+                <small>Applied when the frames are first assigned. Video sources keep their original duration.</small>
+              </label>
+            </div>
+          )}
           <label className="form-field">
             <span>Topic</span>
             <input
@@ -3293,6 +3384,32 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
             </div>
           </div>
           {error && <div className="inline-error">{error}</div>}
+          {type === "video_slideshow" && (
+            <div className="frame-duration-bulk">
+              <label className="frame-duration-control">
+                <span>Set image duration in bulk</span>
+                <div className="frame-duration-input">
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="30"
+                    step="0.05"
+                    value={bulkDurationDraft}
+                    onChange={(event) => setBulkDurationDraft(event.target.value)}
+                    aria-label="Duration for unlocked image frames"
+                  />
+                  <span>s</span>
+                </div>
+              </label>
+              <Button
+                onClick={() => void applyUnlockedImageDuration()}
+                disabled={!content || saving || !content.frames.some((frame) => frame.sourceMedia?.mediaType === "image" && !frame.imageLocked)}
+              >
+                Apply to unlocked images
+              </Button>
+              <small>Locked frames and video sources are left unchanged.</small>
+            </div>
+          )}
           <div className="frame-selection-list">
             {content?.frames.map((frame) => (
               <div className="frame-selection-group" key={frame.id}>
@@ -3328,7 +3445,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                         type="number"
                         min="0.1"
                         max={frameDurationMaximum(frame)}
-                        step="0.1"
+                        step="0.05"
                         value={durationDrafts[frame.id] ?? String(frame.durationSeconds ?? config.video?.secondsPerImage ?? 2.5)}
                         onChange={(event) => {
                           setDirty(true);
@@ -3567,22 +3684,6 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               </div>
               <div className="form-row">
                 <label className="form-field">
-                  <span>Seconds per image</span>
-                  <input
-                    type="number"
-                    min="0.5"
-                    max="30"
-                    step="0.1"
-                    value={config.video?.secondsPerImage ?? 2.5}
-                    onChange={(event) =>
-                      updateConfig("video", {
-                        ...config.video,
-                        secondsPerImage: Number(event.target.value),
-                      })
-                    }
-                  />
-                </label>
-                <label className="form-field">
                   <span>Transition</span>
                   <select
                     value={config.video?.transition ?? "fade"}
@@ -3700,6 +3801,18 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               </Button>
             </div>
           </div>
+          {content?.status === "preview_generating" && (
+            <div className="preview-progress" role="status">
+              <strong>Preview is rendering locally.</strong>
+              <span>{previewJob ? `Render progress: ${previewJob.progress}%` : "The local renderer is starting…"}</span>
+            </div>
+          )}
+          {content?.status === "failed" && (
+            <div className="inline-error">
+              <span>{content.errorMessage ?? "Preview rendering failed."}</span>
+              <Button onClick={() => void retryPreview()} disabled={saving}>Retry preview</Button>
+            </div>
+          )}
           {previewAsset ? (
             <div className="preview-workspace">
               <div className="preview-main">
@@ -3728,30 +3841,20 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                       ))}
                   </div>
                 )}
-                {content?.status === "failed" && (
-                  <div className="inline-error">
-                    {content.errorMessage}
-                    <Button
-                      onClick={() =>
-                        content &&
-                        request(`/api/content/${content.id}/retry`, {
-                          method: "POST",
-                          body: JSON.stringify({ jobType: "preview_render" }),
-                        }).then((result: AnyRecord) => setContent(result.content))
-                      }
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                )}
               </div>
             </div>
           ) : (
             <div className="preview-empty">
-              <p>Generate a preview after copy and images are ready.</p>
-              <Button variant="primary" onClick={generatePreview} disabled={!content || saving}>
-                Generate preview
-              </Button>
+              {content?.status === "preview_generating" ? (
+                <p>Keep this window open while the local renderer finishes.</p>
+              ) : content?.status !== "failed" ? (
+                <>
+                  <p>Generate a preview after copy and images are ready.</p>
+                  <Button variant="primary" onClick={generatePreview} disabled={!content || saving}>
+                    Generate preview
+                  </Button>
+                </>
+              ) : null}
             </div>
           )}
           {content?.status === "ready" && (
