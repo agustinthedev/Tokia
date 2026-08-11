@@ -145,6 +145,7 @@ interface ContentFrame {
   endSeconds?: number | null;
   textLocked: boolean;
   imageLocked: boolean;
+  settings?: AnyRecord;
   sourceMedia?: Asset | null;
 }
 interface ContentDetail extends ContentSummary {
@@ -2704,11 +2705,14 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const [content, setContent] = useState<ContentDetail | null>(null);
   const [durationDrafts, setDurationDrafts] = useState<Record<string, string>>({});
   const [trimDrafts, setTrimDrafts] = useState<Record<string, { start: string; end: string }>>({});
+  const [activeTrimFrameId, setActiveTrimFrameId] = useState<string | null>(null);
+  const [detectedVideoDurations, setDetectedVideoDurations] = useState<Record<string, number>>({});
   const [bulkDurationDraft, setBulkDurationDraft] = useState("2.5");
   const [previewPolling, setPreviewPolling] = useState(false);
   const captionDraft = useRef("");
   const captionContentId = useRef<string | undefined>(undefined);
   const sourcePreviewRequest = useRef(0);
+  const videoMetadataRequests = useRef(new Set<string>());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -2776,6 +2780,11 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       active = false;
     };
   }, [existingId]);
+  useEffect(() => {
+    setActiveTrimFrameId(null);
+    setDetectedVideoDurations({});
+    videoMetadataRequests.current.clear();
+  }, [content?.id]);
   useEffect(() => {
     if (type === "video_slideshow") {
       setBulkDurationDraft(String(config.video?.secondsPerImage ?? 2.5));
@@ -3029,12 +3038,42 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       setError(caught instanceof Error ? caught.message : "Could not save text");
     }
   };
+  const handleVideoMetadata = async (frame: ContentFrame, rawDuration: number) => {
+    if (!content || !frame.sourceMedia || frame.sourceMedia.mediaType !== "video") return;
+    if (!Number.isFinite(rawDuration) || rawDuration <= 0) return;
+    const durationSeconds = Math.round(rawDuration * 100) / 100;
+    setDetectedVideoDurations((current) => ({ ...current, [frame.id]: durationSeconds }));
+    if (frame.sourceMedia.durationSeconds && frame.sourceMedia.durationSeconds > 0) return;
+    const requestKey = `${frame.sourceMedia.id}:${durationSeconds}`;
+    if (videoMetadataRequests.current.has(requestKey)) return;
+    videoMetadataRequests.current.add(requestKey);
+    try {
+      await request<Asset>(`/api/assets/${frame.sourceMedia.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ durationSeconds }),
+      });
+      const currentFrame = content.frames.find((item) => item.id === frame.id);
+      if (!currentFrame || currentFrame.sourceMedia?.id !== frame.sourceMedia.id) return;
+      if (currentFrame.settings?.durationCustomized || trimDrafts[frame.id]) {
+        setContent(await request<ContentDetail>(`/api/content/${content.id}`));
+      } else {
+        setContent(await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ startSeconds: 0, endSeconds: durationSeconds }),
+        }));
+      }
+    } catch (caught) {
+      videoMetadataRequests.current.delete(requestKey);
+      setError(caught instanceof Error ? caught.message : "Could not save video duration");
+    }
+  };
   const frameDurationMaximum = (frame: ContentFrame) => {
     const source = frame.sourceMedia;
     return source && (source.mediaType === "video" || source.mediaType === "animated") && source.durationSeconds && source.durationSeconds > 0 ? source.durationSeconds : 30;
   };
   const frameTrimMaximum = (frame: ContentFrame) => {
-    const sourceDuration = frame.sourceMedia?.durationSeconds;
+    const storedDuration = frame.sourceMedia?.durationSeconds;
+    const sourceDuration = storedDuration && storedDuration > 0 ? storedDuration : detectedVideoDurations[frame.id];
     const fallback = frame.endSeconds ?? frame.durationSeconds ?? 30;
     return sourceDuration && sourceDuration > 0 ? sourceDuration : Math.max(0.1, fallback);
   };
@@ -3548,7 +3587,22 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
           <div className="frame-selection-list">
             {content?.frames.map((frame) => (
               <div className="frame-selection-group" key={frame.id}>
-                <div className="frame-selection-row" draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", frame.id)}>
+                <div
+                  className="frame-selection-row"
+                  draggable={activeTrimFrameId !== frame.id}
+                  onDragStart={(event) => {
+                    const target = event.target instanceof Element ? event.target : null;
+                    if (
+                      event.defaultPrevented ||
+                      target?.closest("[data-no-frame-drag]") ||
+                      event.currentTarget.querySelector("[data-no-frame-drag]:active")
+                    ) {
+                      event.preventDefault();
+                      return;
+                    }
+                    event.dataTransfer.setData("text/plain", frame.id);
+                  }}
+                >
                 <span className="frame-number">{frame.position}</span>
                 <div className="frame-selection-preview">
                   {frame.sourceMedia ? (
@@ -3574,6 +3628,8 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                 </div>
                 {type === "video_slideshow" && (
                   frame.sourceMedia?.mediaType === "video" || frame.sourceMedia?.mediaType === "animated" ? (() => {
+                    const storedDuration = frame.sourceMedia.durationSeconds;
+                    const originalDuration = storedDuration && storedDuration > 0 ? storedDuration : detectedVideoDurations[frame.id];
                     const maximum = frameTrimMaximum(frame);
                     const minimum = frameTrimMinimum(frame);
                     const draft = frameTrimDraft(frame);
@@ -3582,9 +3638,28 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                     const startPercent = maximum ? (start / maximum) * 100 : 0;
                     const endPercent = maximum ? (end / maximum) * 100 : 100;
                     return (
-                      <div className="frame-duration-control frame-trim-control">
+                      <div
+                        className="frame-duration-control frame-trim-control"
+                        data-no-frame-drag
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          setActiveTrimFrameId(frame.id);
+                        }}
+                        onPointerUp={() => setActiveTrimFrameId((current) => current === frame.id ? null : current)}
+                        onPointerCancel={() => setActiveTrimFrameId((current) => current === frame.id ? null : current)}
+                        onDragStart={(event) => event.preventDefault()}
+                      >
                         <span>Video range</span>
                         <div className="frame-trim-editor">
+                          {(!frame.sourceMedia.durationSeconds || frame.sourceMedia.durationSeconds <= 0) && detectedVideoDurations[frame.id] == null && (
+                            <video
+                              className="frame-trim-metadata"
+                              preload="metadata"
+                              src={`${API_BASE}/api/assets/${frame.sourceMedia.id}/media`}
+                              onLoadedMetadata={(event) => void handleVideoMetadata(frame, event.currentTarget.duration)}
+                              aria-hidden="true"
+                            />
+                          )}
                           <div className="frame-trim-slider" style={{ "--trim-start": `${startPercent}%`, "--trim-end": `${endPercent}%` } as CSSProperties}>
                             <div className="frame-trim-track" />
                             <div className="frame-trim-selection" />
@@ -3599,6 +3674,8 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                               onBlur={() => void saveFrameTrim(frame)}
                               onPointerUp={() => void saveFrameTrim(frame)}
                               onKeyUp={() => void saveFrameTrim(frame)}
+                              draggable={false}
+                              disabled={!originalDuration}
                               aria-label={`Video start for frame ${frame.position}`}
                             />
                             <input
@@ -3612,12 +3689,14 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                               onBlur={() => void saveFrameTrim(frame)}
                               onPointerUp={() => void saveFrameTrim(frame)}
                               onKeyUp={() => void saveFrameTrim(frame)}
+                              draggable={false}
+                              disabled={!originalDuration}
                               aria-label={`Video end for frame ${frame.position}`}
                             />
                           </div>
-                          <div className="frame-trim-times"><span>{preciseDuration(start)}</span><span>{preciseDuration(end)} / {preciseDuration(maximum)}</span></div>
+                          <div className="frame-trim-times"><span>{preciseDuration(start)}</span><span>{originalDuration ? `${preciseDuration(end)} / ${preciseDuration(maximum)}` : "Loading original duration..."}</span></div>
                         </div>
-                        <small>{frame.sourceMedia.durationSeconds ? `Original ${frame.sourceMedia.durationSeconds.toFixed(2)}s · drag both handles` : "Original duration unavailable"}</small>
+                        <small>{originalDuration ? `Original ${originalDuration.toFixed(2)}s · drag both handles` : "Loading original duration..."}</small>
                       </div>
                     );
                   })() : (

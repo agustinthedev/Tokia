@@ -141,6 +141,12 @@ describe('project and content workflow', () => {
     const createdProject = await app.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: 'Video sources', niche: 'Travel', collectionIds: [collectionId] } });
     const projectId = createdProject.json().id as string;
     const videoAsset = (await app.inject({ method: 'GET', url: `/api/collections/${collectionId}/assets?mediaType=video` })).json().items[0];
+    const durationMetadata = await app.inject({ method: 'PATCH', url: `/api/assets/${videoAsset.id}`, headers, payload: { durationSeconds: 13 } });
+    expect(durationMetadata.statusCode).toBe(200);
+    expect(durationMetadata.json().durationSeconds).toBe(13);
+    const invalidAssetDuration = await app.inject({ method: 'PATCH', url: `/api/assets/${videoAsset.id}`, headers, payload: { durationSeconds: 0 } });
+    expect(invalidAssetDuration.statusCode).toBe(400);
+    expect(invalidAssetDuration.json().error.code).toBe('INVALID_ASSET_DURATION');
     const scopedAssets = await app.inject({ method: 'GET', url: `/api/assets?mediaType=source&collectionIds=${collectionId}&search=${videoAsset.externalId}` });
     expect(scopedAssets.statusCode).toBe(200);
     expect(scopedAssets.json().items.map((asset: { id: string }) => asset.id)).toContain(videoAsset.id);
@@ -156,7 +162,7 @@ describe('project and content workflow', () => {
     const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 1, includeCover: false, includeCta: false, textMode: 'none', video: { secondsPerImage: 1.5 } } } });
     const videoContentId = videoDraft.json().id as string;
     const videoContentSelection = await app.inject({ method: 'POST', url: `/api/content/${videoContentId}/images/select`, headers, payload: { mediaIds: [videoAsset.id] } });
-    expect(videoContentSelection.json().frames[0].durationSeconds).toBe(4.2);
+    expect(videoContentSelection.json().frames[0].durationSeconds).toBe(13);
     const durationUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 2.1 } });
     expect(durationUpdate.statusCode).toBe(200);
     expect(durationUpdate.json().frames[0].durationSeconds).toBe(2.1);
@@ -169,7 +175,7 @@ describe('project and content workflow', () => {
     const invalidTrim = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { startSeconds: 3.4, endSeconds: 3.3 } });
     expect(invalidTrim.statusCode).toBe(400);
     expect(invalidTrim.json().error.code).toBe('INVALID_FRAME_TRIM');
-    const invalidDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 4.3 } });
+    const invalidDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 13.1 } });
     expect(invalidDuration.statusCode).toBe(400);
     expect(invalidDuration.json().error.code).toBe('INVALID_FRAME_DURATION');
   });

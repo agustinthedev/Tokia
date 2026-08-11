@@ -168,6 +168,24 @@ function persistResolvedVideo(db: Database.Database, assetId: string, resolved: 
     assetId,
   );
 }
+async function hydrateVideoAsset(db: Database.Database, asset: Row): Promise<Row> {
+  if (mediaType(asset) !== "video" || Number(asset.duration_seconds) > 0) return asset;
+  const canonicalUrl = typeof asset.canonical_asset_url === "string" ? asset.canonical_asset_url : "";
+  if (!canonicalUrl) return asset;
+  const resolved = await resolvePinterestVideo(canonicalUrl);
+  const mediaUrl = resolved.mediaUrl ?? (isPlayableVideoUrl(asset.remote_media_url) ? asset.remote_media_url : null);
+  if (mediaUrl) {
+    persistResolvedVideo(db, String(asset.id), {
+      mediaUrl,
+      posterUrl: resolved.posterUrl,
+      mimeType: resolved.mimeType,
+      durationSeconds: resolved.durationSeconds,
+    });
+  } else if (resolved.durationSeconds != null) {
+    db.prepare("UPDATE assets SET duration_seconds = ?, updated_at = ? WHERE id = ?").run(resolved.durationSeconds, now(), asset.id);
+  }
+  return db.prepare("SELECT * FROM assets WHERE id = ?").get(asset.id) as Row;
+}
 function parseJson<T>(value: unknown, fallback: T): T {
   if (typeof value !== "string") return fallback;
   try {
@@ -1393,17 +1411,12 @@ export async function buildApp(
             message: "Only video assets can resolve media",
           },
         });
-      if (isPlayableVideoUrl(row.remote_media_url)) return toAsset(row);
+      if (isPlayableVideoUrl(row.remote_media_url) && Number(row.duration_seconds) > 0) return toAsset(row);
       if (
         typeof row.canonical_asset_url !== "string" ||
         !row.canonical_asset_url
       )
-        return reply.code(422).send({
-          error: {
-            code: "VIDEO_SOURCE_UNAVAILABLE",
-            message: "This video has no Pinterest source URL",
-          },
-        });
+        return toAsset(row);
       const resolved = await resolvePinterestVideo(row.canonical_asset_url);
       if (!resolved.mediaUrl)
         return reply.code(422).send({
@@ -1640,6 +1653,23 @@ export async function buildApp(
         return reply.code(404).send({
           error: { code: "ASSET_NOT_FOUND", message: "Asset not found" },
         });
+      const nextDuration =
+        body.durationSeconds === undefined
+          ? existing.duration_seconds
+          : Number(body.durationSeconds);
+      if (
+        body.durationSeconds !== undefined &&
+        (mediaType(existing) !== "video" ||
+          !Number.isFinite(nextDuration) ||
+          nextDuration <= 0 ||
+          nextDuration > 86_400)
+      )
+        return reply.code(400).send({
+          error: {
+            code: "INVALID_ASSET_DURATION",
+            message: "Video duration must be greater than 0 and no more than 86400 seconds.",
+          },
+        });
       const nextStatus = parsed?.success ? parsed.data : existing.status;
       const notes =
         body.localNotes === undefined
@@ -1656,8 +1686,8 @@ export async function buildApp(
             ? null
             : existing.archived_at;
       db.prepare(
-        "UPDATE assets SET status = ?, local_notes = ?, local_tags = ?, archived_at = ?, updated_at = ? WHERE id = ?",
-      ).run(nextStatus, notes, tags, archivedAt, now(), id);
+        "UPDATE assets SET status = ?, local_notes = ?, local_tags = ?, archived_at = ?, duration_seconds = ?, updated_at = ? WHERE id = ?",
+      ).run(nextStatus, notes, tags, archivedAt, nextDuration, now(), id);
       return toAsset(
         db.prepare("SELECT * FROM assets WHERE id = ?").get(id) as Row,
       );
@@ -2243,7 +2273,7 @@ export async function buildApp(
         configuration: body.configuration ?? body.config,
       });
       if (body.autoSelect === true)
-        selectImagesForContent(id, String((draft as Row).id), undefined, false);
+        await selectImagesForContent(id, String((draft as Row).id), undefined, false);
       return reply
         .code(201)
         .send(contentSnapshot(db, String((draft as Row).id)));
@@ -2576,12 +2606,12 @@ export async function buildApp(
     },
   );
 
-  function selectImagesForContent(
+  async function selectImagesForContent(
     projectId: string,
     contentId: string,
     requestedIds?: string[],
     shuffle = false,
-  ): Row {
+  ): Promise<Row> {
     const content = contentExists(contentId);
     if (content.projectId !== projectId)
       throw new ContentValidationError(
@@ -2632,12 +2662,13 @@ export async function buildApp(
           )
           .filter(Boolean)
       : imageRows.slice(0, required);
+    const hydratedSelected = await Promise.all(selected.map((asset) => hydrateVideoAsset(db, asset)));
     db.transaction(() => {
       const timestamp = now();
       const configuration = content.configuration as ContentConfiguration;
       for (let index = 0; index < frames.length; index += 1) {
         const frame = frames[index]!;
-        const asset = selected[index]!;
+        const asset = hydratedSelected[index]!;
         const settings = {
           ...parseJson<Row>(frame.settings_json, {}),
           durationSeconds: defaultFrameDuration(
@@ -2672,7 +2703,7 @@ export async function buildApp(
       if (!integrationGuard(settings, request, reply)) return;
       const { id } = request.params as { id: string };
       const content = contentExists(id);
-      return selectImagesForContent(
+      return await selectImagesForContent(
         content.projectId as string,
         id,
         Array.isArray(bodyOf(request).mediaIds)
@@ -2717,11 +2748,12 @@ export async function buildApp(
           "There are not enough unlocked images to shuffle these frames.",
         );
       const selected = available.slice(0, unlocked.length);
+      const hydratedSelected = await Promise.all(selected.map((asset) => hydrateVideoAsset(db, asset)));
       db.transaction(() => {
         const configuration = content.configuration as ContentConfiguration;
         for (let index = 0; index < unlocked.length; index += 1) {
           const frame = unlocked[index]!;
-          const asset = selected[index]!;
+          const asset = hydratedSelected[index]!;
           const frameSettings = {
             ...parseJson<Row>(frame.settings_json, {}),
             durationSeconds: defaultFrameDuration(
@@ -2771,7 +2803,7 @@ export async function buildApp(
       const placeholders = sourceIds.sourceCollectionIds
         .map(() => "?")
         .join(",");
-      const candidate = db
+      let candidate = db
         .prepare(
           `SELECT DISTINCT a.id, a.media_type, a.duration_seconds FROM assets a JOIN collection_assets ca ON ca.asset_id = a.id WHERE a.id = ? AND ca.collection_id IN (${placeholders}) AND a.media_type IN ('image','video','animated') AND a.status = 'available' AND a.archived_at IS NULL`,
         )
@@ -2781,6 +2813,7 @@ export async function buildApp(
           "INVALID_IMAGE_SELECTION",
           "The replacement image is not available in the project sources.",
         );
+      if (candidate.media_type === "video") candidate = await hydrateVideoAsset(db, candidate);
       if (
         db
           .prepare(
