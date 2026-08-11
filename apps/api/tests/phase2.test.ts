@@ -203,4 +203,27 @@ describe('Phase 2 management API', () => {
     expect(calls).toBe(3);
     expect(db!.prepare('SELECT remote_media_url FROM assets WHERE id = ?').get(assetId)).toMatchObject({ remote_media_url: freshUrl });
   });
+
+  it('streams an image through the API and falls back from Pinterest originals', async () => {
+    ({ db, app } = await setup());
+    const imported = await importBoard(app);
+    const assetId = (db!.prepare('SELECT id FROM assets WHERE external_asset_id = ?').get('image-1') as { id: string }).id;
+    const requested: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requested.push(url);
+      const headers = new Headers(init?.headers);
+      expect(headers.get('referer')).toBe('https://www.pinterest.com/pin/image-1/');
+      if (url.includes('/originals/')) return new Response('missing', { status: 404 });
+      return new Response(Buffer.from('image'), { status: 200, headers: { 'content-type': 'image/jpeg', 'content-length': '5' } });
+    }));
+    const streamed = await app.inject({ method: 'GET', url: `/api/assets/${assetId}/image` });
+    expect(streamed.statusCode).toBe(200);
+    expect(streamed.headers).toMatchObject({ 'content-type': 'image/jpeg', 'content-length': '5' });
+    expect(streamed.body).toBe('image');
+    expect(requested).toEqual([
+      'https://i.pinimg.com/originals/image-1.jpg',
+      'https://i.pinimg.com/1200x/image-1.jpg',
+    ]);
+  });
 });
