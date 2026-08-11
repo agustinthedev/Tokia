@@ -207,6 +207,63 @@ describe('project and content workflow', () => {
     expect(bulkImageDuration.statusCode).toBe(200);
     expect(bulkImageDuration.json().frames[0]).toMatchObject({ durationSeconds: 0.8, imageLocked: false, sourceMedia: { mediaType: 'image' } });
   });
+
+  it('auto-selects slideshow sources across selected collections instead of only the newest collection', async () => {
+    db = createDatabase(':memory:');
+    let randomCalls = 0;
+    const randomSequence = [0, 1, 2, 2, 0, 1, 1, 2, 0];
+    db.function('random', () => randomSequence[randomCalls++ % randomSequence.length]);
+    app = await buildApp({ db, settings: { ...config, localIntegrationToken: token } });
+    const headers = { 'x-local-integration-token': token };
+    const importCollection = async (externalId: string, name: string, pinIds: string[]) => {
+      const response = await app!.inject({ method: 'POST', url: '/api/imports/pinterest-board', headers, payload: {
+        schemaVersion: 1,
+        source: 'test',
+        exportedAt: new Date().toISOString(),
+        board: { externalId, name, url: `https://www.pinterest.com/test/${externalId}/`, description: null },
+        pins: pinIds.map((pinId) => ({
+          externalId: pinId,
+          pinUrl: `https://www.pinterest.com/pin/${pinId}/`,
+          imageUrl: `https://i.pinimg.com/736x/${pinId}.jpg`,
+          previewUrl: `https://i.pinimg.com/236x/${pinId}.jpg`,
+          width: 736,
+          height: 1104,
+        })),
+      } });
+      expect(response.statusCode).toBe(200);
+      return response.json().collection.id as string;
+    };
+    const wealthCollectionId = await importCollection('wealth-attract', 'Wealth Attract', ['wealth-1']);
+    const darkCollectionId = await importCollection('dark-aesthetics', 'Dark Aesthetics', ['dark-1', 'dark-2']);
+    const wealthAsset = (await app.inject({ method: 'GET', url: `/api/collections/${wealthCollectionId}/assets` })).json().items[0];
+    db.prepare('UPDATE assets SET last_seen_at = ? WHERE id = ?').run('2020-01-01T00:00:00.000Z', wealthAsset.id);
+    db.prepare("UPDATE assets SET last_seen_at = '2030-01-01T00:00:00.000Z' WHERE external_asset_id LIKE 'dark-%'").run();
+
+    const project = await app.inject({ method: 'POST', url: '/api/projects', headers, payload: {
+      name: 'Mixed sources',
+      niche: 'Lifestyle',
+      collectionIds: [wealthCollectionId, darkCollectionId],
+    } });
+    const projectId = project.json().id as string;
+    const draft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: {
+      type: 'video_slideshow',
+      configuration: {
+        sourceCollectionIds: [wealthCollectionId, darkCollectionId],
+        totalFrames: 2,
+        includeCover: false,
+        includeCta: false,
+        textMode: 'none',
+      },
+    } });
+    const contentId = draft.json().id as string;
+    const selectedIds = new Set<string>();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const selected = await app.inject({ method: 'POST', url: `/api/content/${contentId}/images/select`, headers, payload: {} });
+      expect(selected.statusCode).toBe(200);
+      for (const frame of selected.json().frames) selectedIds.add(frame.sourceMedia.id);
+    }
+    expect(selectedIds).toContain(wealthAsset.id);
+  });
 });
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
