@@ -76,8 +76,9 @@ describe('project and content workflow', () => {
     expect(finalDownload.headers['content-disposition']).toMatch(/filename="[^"]+-slides\.zip"/);
     expect(finalDownload.body).toContain('slide-01.png');
     expect(finalDownload.body).toContain('slide-05.png');
-    const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 3, includeCover: true, includeCta: false, textMode: 'none', video: { secondsPerImage: 0.35, fps: 24, outputResolution: '720p' } } } });
+    const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', title: 'Morning mobility slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 3, includeCover: true, includeCta: false, textMode: 'none', video: { secondsPerImage: 0.35, fps: 24, outputResolution: '720p' } } } });
     const videoId = videoDraft.json().id as string;
+    expect(videoDraft.json().title).toBe('Morning mobility slideshow');
     const videoSelectedResponse = await app.inject({ method: 'POST', url: `/api/content/${videoId}/images/select`, headers, payload: {} });
     expect(videoSelectedResponse.json().configuration.video.secondsPerImage).toBe(0.35);
     expect(videoSelectedResponse.json().frames.map((frame: { durationSeconds: number }) => frame.durationSeconds)).toEqual([0.35, 0.35, 0.35]);
