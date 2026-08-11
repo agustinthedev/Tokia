@@ -194,6 +194,14 @@ function parseJson<T>(value: unknown, fallback: T): T {
     return fallback;
   }
 }
+function frameSettingsForSource(existingSettings: unknown, configuration: ContentConfiguration, asset: Row): Row {
+  const { startSeconds: _startSeconds, endSeconds: _endSeconds, ...preservedSettings } = parseJson<Row>(existingSettings, {});
+  return {
+    ...preservedSettings,
+    durationSeconds: defaultFrameDuration(configuration, asset.media_type, asset.duration_seconds),
+    durationCustomized: false,
+  };
+}
 function newId(): string {
   return crypto.randomUUID();
 }
@@ -2463,14 +2471,14 @@ export async function buildApp(
       );
       const frames = db
         .prepare(
-          "SELECT f.id, f.image_locked, a.media_type FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id WHERE f.content_id = ? ORDER BY f.position",
+          "SELECT f.id, f.image_locked, f.source_media_id, a.media_type FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id WHERE f.content_id = ? ORDER BY f.position",
         )
         .all(id) as Row[];
       const timestamp = now();
       let updatedFrameCount = 0;
       db.transaction(() => {
         for (const frame of frames) {
-          if (frame.image_locked || frame.media_type !== "image") continue;
+          if (frame.image_locked || !frame.source_media_id || isMotionMedia(frame.media_type)) continue;
           const existing = db
             .prepare("SELECT settings_json FROM content_frames WHERE id = ?")
             .get(frame.id) as Row | undefined;
@@ -2669,15 +2677,7 @@ export async function buildApp(
       for (let index = 0; index < frames.length; index += 1) {
         const frame = frames[index]!;
         const asset = hydratedSelected[index]!;
-        const settings = {
-          ...parseJson<Row>(frame.settings_json, {}),
-          durationSeconds: defaultFrameDuration(
-            configuration,
-            asset.media_type,
-            asset.duration_seconds,
-          ),
-          durationCustomized: false,
-        };
+        const settings = frameSettingsForSource(frame.settings_json, configuration, asset);
         db.prepare(
           "UPDATE content_frames SET source_media_id = ?, settings_json = ?, updated_at = ? WHERE id = ?",
         ).run(asset.id, JSON.stringify(settings), timestamp, frame.id);
@@ -2754,15 +2754,7 @@ export async function buildApp(
         for (let index = 0; index < unlocked.length; index += 1) {
           const frame = unlocked[index]!;
           const asset = hydratedSelected[index]!;
-          const frameSettings = {
-            ...parseJson<Row>(frame.settings_json, {}),
-            durationSeconds: defaultFrameDuration(
-              configuration,
-              asset.media_type,
-              asset.duration_seconds,
-            ),
-            durationCustomized: false,
-          };
+          const frameSettings = frameSettingsForSource(frame.settings_json, configuration, asset);
           db.prepare(
             "UPDATE content_frames SET source_media_id = ?, settings_json = ?, updated_at = ? WHERE id = ?",
           ).run(asset.id, JSON.stringify(frameSettings), now(), frame.id);
@@ -2826,15 +2818,7 @@ export async function buildApp(
           "An image cannot be used twice in one content item.",
         );
       db.transaction(() => {
-        const settings = {
-          ...parseJson<Row>(frame.settings_json, {}),
-          durationSeconds: defaultFrameDuration(
-            content.configuration as ContentConfiguration,
-            candidate.media_type,
-            candidate.duration_seconds,
-          ),
-          durationCustomized: false,
-        };
+        const settings = frameSettingsForSource(frame.settings_json, content.configuration as ContentConfiguration, candidate);
         db.prepare(
           "UPDATE content_frames SET source_media_id = ?, image_locked = 1, settings_json = ?, updated_at = ? WHERE id = ?",
         ).run(mediaId, JSON.stringify(settings), now(), frameId);
