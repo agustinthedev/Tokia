@@ -195,10 +195,11 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 function frameSettingsForSource(existingSettings: unknown, configuration: ContentConfiguration, asset: Row): Row {
-  const { startSeconds: _startSeconds, endSeconds: _endSeconds, ...preservedSettings } = parseJson<Row>(existingSettings, {});
+  const { startSeconds: _startSeconds, endSeconds: _endSeconds, muted: _muted, ...preservedSettings } = parseJson<Row>(existingSettings, {});
   return {
     ...preservedSettings,
     durationSeconds: defaultFrameDuration(configuration, asset.media_type, asset.duration_seconds),
+    muted: false,
     durationCustomized: false,
   };
 }
@@ -2545,19 +2546,32 @@ export async function buildApp(
             ? 1
             : 0;
       let frameSettings = parseJson<Row>(existing.settings_json, {});
+      const source = existing.source_media_id
+        ? (db
+            .prepare(
+              "SELECT media_type, duration_seconds FROM assets WHERE id = ?",
+            )
+            .get(existing.source_media_id) as Row | undefined)
+        : undefined;
+      if (body.muted !== undefined) {
+        if (content.type !== "video_slideshow" || !isMotionMedia(source?.media_type))
+          throw new ContentValidationError(
+            "MUTE_NOT_SUPPORTED",
+            "Audio mute is only available for video sources in video slideshows.",
+          );
+        if (typeof body.muted !== "boolean")
+          throw new ContentValidationError(
+            "INVALID_MUTE_SETTING",
+            "muted must be a boolean.",
+          );
+        frameSettings = { ...frameSettings, muted: body.muted };
+      }
       if (body.durationSeconds !== undefined || body.startSeconds !== undefined || body.endSeconds !== undefined) {
         if (content.type !== "video_slideshow")
           throw new ContentValidationError(
             "DURATION_NOT_SUPPORTED",
             "Per-frame duration is only available for video slideshows.",
           );
-        const source = existing.source_media_id
-          ? (db
-              .prepare(
-                "SELECT media_type, duration_seconds FROM assets WHERE id = ?",
-              )
-              .get(existing.source_media_id) as Row | undefined)
-          : undefined;
         if (body.startSeconds !== undefined || body.endSeconds !== undefined) {
           if (!isMotionMedia(source?.media_type))
             throw new ContentValidationError(

@@ -65,6 +65,26 @@ async function runFfmpeg(ffmpegPath: string, args: string[]): Promise<void> {
   });
 }
 
+function defaultFfprobePath(ffmpegPath: string): string {
+  if (/ffmpeg\.exe$/i.test(ffmpegPath)) return ffmpegPath.replace(/ffmpeg\.exe$/i, 'ffprobe.exe');
+  if (/ffmpeg$/i.test(ffmpegPath)) return ffmpegPath.replace(/ffmpeg$/i, 'ffprobe');
+  return 'ffprobe';
+}
+
+async function hasAudioTrack(ffprobePath: string, sourcePath: string): Promise<boolean> {
+  return await new Promise<boolean>((resolve, reject) => {
+    const child = spawn(ffprobePath, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=index', '-of', 'csv=p=0', sourcePath], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); if (stderr.length > 8_000) stderr = stderr.slice(-8_000); });
+    child.on('error', (error) => reject(new MediaProcessingError('FFPROBE_UNAVAILABLE', error.message)));
+    child.on('close', (code) => code === 0
+      ? resolve(Boolean(stdout.trim()))
+      : reject(new MediaProcessingError('FFPROBE_FAILED', stderr.trim().split(/\r?\n/).slice(-3).join(' ') || `FFprobe exited with code ${code}.`)));
+  });
+}
+
 function filterFor(configuration: ContentConfiguration, width: number, height: number): string {
   const crop = configuration.visual.cropMode;
   if (crop === 'fit' || crop === 'pad') return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
@@ -188,10 +208,11 @@ export interface SlideshowScene {
   durationSeconds: number;
   startSeconds?: number;
   endSeconds?: number;
+  muted?: boolean;
   text?: TextOverlay | null;
 }
 
-async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowScene; outputPath: string; configuration: ContentConfiguration; width: number; height: number }): Promise<void> {
+async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowScene; outputPath: string; configuration: ContentConfiguration; width: number; height: number; hasAudio: boolean }): Promise<void> {
   const { scene, configuration, width, height } = options;
   const filters = [filterFor(configuration, width, height)];
   const textPaths: string[] = [];
@@ -206,10 +227,31 @@ async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowSc
       }
     }
     const duration = sceneDuration(scene, configuration);
+    const useSourceAudio = scene.mediaType === 'video' && scene.muted !== true && options.hasAudio;
     const input = scene.mediaType === 'video'
       ? [ ...(Number(scene.startSeconds) > 0 ? ['-ss', String(scene.startSeconds)] : []), '-i', scene.path ]
       : ['-loop', '1', '-i', scene.path];
-    await runFfmpeg(options.ffmpegPath, ['-y', ...input, '-t', String(duration), '-vf', `${filters.join(',')},format=yuv420p`, '-an', '-r', String(Math.max(1, Math.min(60, configuration.video.fps))), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', options.outputPath]);
+    const audioInput = useSourceAudio ? [] : ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'];
+    const audioMap = useSourceAudio ? '0:a:0' : '1:a:0';
+    await runFfmpeg(options.ffmpegPath, [
+      '-y',
+      ...input,
+      ...audioInput,
+      '-t', String(duration),
+      '-map', '0:v:0',
+      '-map', audioMap,
+      '-vf', `${filters.join(',')},format=yuv420p`,
+      '-r', String(Math.max(1, Math.min(60, configuration.video.fps))),
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-ar', '48000',
+      '-ac', '2',
+      '-b:a', '128k',
+      '-af', 'apad',
+      '-movflags', '+faststart',
+      options.outputPath,
+    ]);
   } finally {
     await Promise.all(textPaths.map((textPath) => fsp.rm(textPath, { force: true })));
   }
@@ -220,7 +262,7 @@ function sceneDuration(scene: SlideshowScene, configuration: ContentConfiguratio
   return Math.max(0.1, Number.isFinite(rangeDuration) ? rangeDuration : Number(scene.durationSeconds) || configuration.video.secondsPerImage);
 }
 
-export async function renderSlideshow(options: { ffmpegPath: string; imagePaths?: string[]; scenes?: SlideshowScene[]; outputPath: string; configuration: ContentConfiguration }): Promise<{ width: number; height: number; durationMs: number }> {
+export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath?: string; imagePaths?: string[]; scenes?: SlideshowScene[]; outputPath: string; configuration: ContentConfiguration }): Promise<{ width: number; height: number; durationMs: number }> {
   const scenes = options.scenes ?? (options.imagePaths ?? []).map((imagePath) => ({ path: imagePath, mediaType: 'image' as const, durationSeconds: options.configuration.video.secondsPerImage }));
   if (!scenes.length) throw new MediaProcessingError('NO_IMAGES', 'At least one image or video is required for a video slideshow.');
   const dimensions = ratioDimensions(options.configuration.aspectRatio, options.configuration.video.outputResolution);
@@ -230,9 +272,12 @@ export async function renderSlideshow(options: { ffmpegPath: string; imagePaths?
   const height = dimensions.height % 2 === 0 ? dimensions.height : dimensions.height + 1;
   const listPath = `${options.outputPath}.concat.txt`;
   const clipPaths = scenes.map((_, index) => `${options.outputPath}.scene-${String(index + 1).padStart(2, '0')}.mp4`);
+  const ffprobePath = options.ffprobePath ?? defaultFfprobePath(options.ffmpegPath);
   try {
     for (let index = 0; index < scenes.length; index += 1) {
-      await renderSceneClip({ ffmpegPath: options.ffmpegPath, scene: scenes[index]!, outputPath: clipPaths[index]!, configuration: options.configuration, width, height });
+      const scene = scenes[index]!;
+      const hasAudio = scene.mediaType === 'video' && scene.muted !== true ? await hasAudioTrack(ffprobePath, scene.path) : false;
+      await renderSceneClip({ ffmpegPath: options.ffmpegPath, scene, outputPath: clipPaths[index]!, configuration: options.configuration, width, height, hasAudio });
     }
     const lines = clipPaths.map((clipPath) => `file '${clipPath.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`);
     await fsp.writeFile(listPath, lines.join('\n'), 'utf8');
