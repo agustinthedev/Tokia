@@ -2282,7 +2282,7 @@ export async function buildApp(
         configuration: body.configuration ?? body.config,
       });
       if (body.autoSelect === true)
-        await selectImagesForContent(id, String((draft as Row).id), undefined, false);
+        await selectImagesForContent(id, String((draft as Row).id));
       return reply
         .code(201)
         .send(contentSnapshot(db, String((draft as Row).id)));
@@ -2632,7 +2632,6 @@ export async function buildApp(
     projectId: string,
     contentId: string,
     requestedIds?: string[],
-    shuffle = false,
   ): Promise<Row> {
     const content = contentExists(contentId);
     if (content.projectId !== projectId)
@@ -2668,7 +2667,7 @@ export async function buildApp(
           .all(...sourceIds, ...ids) as Row[])
       : (db
           .prepare(
-            `SELECT DISTINCT a.* FROM assets a JOIN collection_assets ca ON ca.asset_id = a.id WHERE ca.collection_id IN (${placeholders}) AND a.media_type IN ('image','video','animated') AND a.status = 'available' AND a.archived_at IS NULL ORDER BY ${shuffle ? "RANDOM()" : "a.last_seen_at DESC"} LIMIT ?`,
+            `SELECT DISTINCT a.* FROM assets a JOIN collection_assets ca ON ca.asset_id = a.id WHERE ca.collection_id IN (${placeholders}) AND a.media_type IN ('image','video','animated') AND a.status = 'available' AND a.archived_at IS NULL ORDER BY RANDOM() LIMIT ?`,
           )
           .all(...sourceIds, required) as Row[]);
     if (imageRows.length < required)
@@ -2725,7 +2724,6 @@ export async function buildApp(
               (value): value is string => typeof value === "string",
             )
           : undefined,
-        false,
       );
     },
   );
