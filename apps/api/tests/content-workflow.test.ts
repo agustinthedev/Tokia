@@ -163,6 +163,12 @@ describe('project and content workflow', () => {
     const bulkVideoDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/duration`, headers, payload: { durationSeconds: 0.35 } });
     expect(bulkVideoDuration.statusCode).toBe(200);
     expect(bulkVideoDuration.json().frames[0].durationSeconds).toBe(2.1);
+    const trimUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { startSeconds: 1.1, endSeconds: 3.3 } });
+    expect(trimUpdate.statusCode).toBe(200);
+    expect(trimUpdate.json().frames[0]).toMatchObject({ startSeconds: 1.1, endSeconds: 3.3, durationSeconds: 2.2 });
+    const invalidTrim = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { startSeconds: 3.4, endSeconds: 3.3 } });
+    expect(invalidTrim.statusCode).toBe(400);
+    expect(invalidTrim.json().error.code).toBe('INVALID_FRAME_TRIM');
     const invalidDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 4.3 } });
     expect(invalidDuration.statusCode).toBe(400);
     expect(invalidDuration.json().error.code).toBe('INVALID_FRAME_DURATION');

@@ -186,6 +186,8 @@ export interface SlideshowScene {
   path: string;
   mediaType: 'image' | 'video';
   durationSeconds: number;
+  startSeconds?: number;
+  endSeconds?: number;
   text?: TextOverlay | null;
 }
 
@@ -203,12 +205,19 @@ async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowSc
         filters.push(`drawtext=fontfile='${escapedFilterPath(part.fontFile)}':textfile='${escapedFilterPath(textPath)}':fontcolor=${configuration.visual.textColor}:fontsize=${part.fontSize}:x=${part.x}:y=${part.y}:line_spacing=${part.lineSpacing}${box}`);
       }
     }
-    const duration = Math.max(0.1, Number(scene.durationSeconds) || configuration.video.secondsPerImage);
-    const input = scene.mediaType === 'video' ? ['-i', scene.path] : ['-loop', '1', '-i', scene.path];
+    const duration = sceneDuration(scene, configuration);
+    const input = scene.mediaType === 'video'
+      ? [ ...(Number(scene.startSeconds) > 0 ? ['-ss', String(scene.startSeconds)] : []), '-i', scene.path ]
+      : ['-loop', '1', '-i', scene.path];
     await runFfmpeg(options.ffmpegPath, ['-y', ...input, '-t', String(duration), '-vf', `${filters.join(',')},format=yuv420p`, '-an', '-r', String(Math.max(1, Math.min(60, configuration.video.fps))), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', options.outputPath]);
   } finally {
     await Promise.all(textPaths.map((textPath) => fsp.rm(textPath, { force: true })));
   }
+}
+
+function sceneDuration(scene: SlideshowScene, configuration: ContentConfiguration): number {
+  const rangeDuration = Number(scene.endSeconds) - Number(scene.startSeconds ?? 0);
+  return Math.max(0.1, Number.isFinite(rangeDuration) ? rangeDuration : Number(scene.durationSeconds) || configuration.video.secondsPerImage);
 }
 
 export async function renderSlideshow(options: { ffmpegPath: string; imagePaths?: string[]; scenes?: SlideshowScene[]; outputPath: string; configuration: ContentConfiguration }): Promise<{ width: number; height: number; durationMs: number }> {
@@ -232,7 +241,7 @@ export async function renderSlideshow(options: { ffmpegPath: string; imagePaths?
     await fsp.rm(listPath, { force: true });
     await Promise.all(clipPaths.map((clipPath) => fsp.rm(clipPath, { force: true })));
   }
-  return { width, height, durationMs: Math.round(scenes.reduce((total, scene) => total + Math.max(0.1, Number(scene.durationSeconds) || options.configuration.video.secondsPerImage), 0) * 1000) };
+  return { width, height, durationMs: Math.round(scenes.reduce((total, scene) => total + sceneDuration(scene, options.configuration), 0) * 1000) };
 }
 
 export async function sha256File(filePath: string): Promise<string> {

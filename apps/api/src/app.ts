@@ -50,8 +50,11 @@ import {
   ContentValidationError,
   contentFrameCount,
   defaultFrameDuration,
+  effectiveFrameTrim,
   frameRoles,
+  isMotionMedia,
   mergeConfiguration,
+  normalizeFrameTrim,
   normalizeFrameDuration,
   slugify,
   type ContentConfiguration,
@@ -2504,7 +2507,7 @@ export async function buildApp(
             ? 1
             : 0;
       let frameSettings = parseJson<Row>(existing.settings_json, {});
-      if (body.durationSeconds !== undefined) {
+      if (body.durationSeconds !== undefined || body.startSeconds !== undefined || body.endSeconds !== undefined) {
         if (content.type !== "video_slideshow")
           throw new ContentValidationError(
             "DURATION_NOT_SUPPORTED",
@@ -2517,16 +2520,43 @@ export async function buildApp(
               )
               .get(existing.source_media_id) as Row | undefined)
           : undefined;
-        frameSettings = {
-          ...frameSettings,
-          durationSeconds: normalizeFrameDuration(
+        if (body.startSeconds !== undefined || body.endSeconds !== undefined) {
+          if (!isMotionMedia(source?.media_type))
+            throw new ContentValidationError(
+              "TRIM_NOT_SUPPORTED",
+              "Video trim is only available for video sources.",
+            );
+          const currentTrim = effectiveFrameTrim(
+            frameSettings,
+            content.configuration as ContentConfiguration,
+            source?.media_type,
+            source?.duration_seconds,
+          );
+          const trim = normalizeFrameTrim(
+            body.startSeconds === undefined ? currentTrim.startSeconds : body.startSeconds,
+            body.endSeconds === undefined ? currentTrim.endSeconds : body.endSeconds,
+            source?.media_type,
+            source?.duration_seconds,
+          );
+          frameSettings = {
+            ...frameSettings,
+            ...trim,
+            durationCustomized: true,
+          };
+        } else {
+          const durationSeconds = normalizeFrameDuration(
             body.durationSeconds,
             content.configuration as ContentConfiguration,
             source?.media_type,
             source?.duration_seconds,
-          ),
-          durationCustomized: true,
-        };
+          );
+          frameSettings = {
+            ...frameSettings,
+            durationSeconds,
+            ...(isMotionMedia(source?.media_type) ? { startSeconds: 0, endSeconds: durationSeconds } : {}),
+            durationCustomized: true,
+          };
+        }
       }
       db.prepare(
         "UPDATE content_frames SET headline = ?, body = ?, text_locked = ?, image_locked = ?, settings_json = ?, updated_at = ? WHERE id = ?",
