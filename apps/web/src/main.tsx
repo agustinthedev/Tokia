@@ -2691,7 +2691,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         setType(loaded.type);
         setConfig(loaded.configuration);
         setSelectedCollections(loaded.configuration.sourceCollectionIds ?? []);
-        setPreviewPolling(["preview_generating", "generation_queued", "generating"].includes(loaded.status));
+        setPreviewPolling(loaded.status === "preview_generating" || loaded.jobs.some((job) => job.jobType === "preview_render" && ["queued", "running"].includes(job.status)));
         const persistedStep = Number(loaded.wizardStep);
         const fallbackStep = loaded.narrative || loaded.frames.some((frame) => frame.sourceMedia) ? 4 : 1;
         setStep(
@@ -2726,7 +2726,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const hasActiveTextJob = content?.jobs?.some((job) => ["narrative_generation", "caption_regeneration", "frame_regeneration"].includes(job.jobType) && ["queued", "running"].includes(job.status)) ?? false;
   useEffect(() => {
     const hasActivePreviewJob = content?.jobs?.some((job) => job.jobType === "preview_render" && ["queued", "running"].includes(job.status)) ?? false;
-    const isPreviewTerminal = content && ["preview_ready", "failed"].includes(content.status);
+    const isPreviewTerminal = content && ["preview_ready", "failed", "ready"].includes(content.status);
     if (previewPolling && isPreviewTerminal) {
       setPreviewPolling(false);
       return;

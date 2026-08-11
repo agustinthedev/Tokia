@@ -159,6 +159,9 @@ describe('project and content workflow', () => {
     const durationUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 2.1 } });
     expect(durationUpdate.statusCode).toBe(200);
     expect(durationUpdate.json().frames[0].durationSeconds).toBe(2.1);
+    const bulkVideoDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/duration`, headers, payload: { durationSeconds: 0.35 } });
+    expect(bulkVideoDuration.statusCode).toBe(200);
+    expect(bulkVideoDuration.json().frames[0].durationSeconds).toBe(2.1);
     const invalidDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 4.3 } });
     expect(invalidDuration.statusCode).toBe(400);
     expect(invalidDuration.json().error.code).toBe('INVALID_FRAME_DURATION');
