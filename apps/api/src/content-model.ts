@@ -102,7 +102,7 @@ export function mergeConfiguration(input: unknown, projectDefaults?: unknown): C
   merged.visual = { ...DEFAULT_CONFIGURATION.visual, ...(defaults.visual as object ?? {}), ...(source.visual as object ?? {}) };
   merged.video = { ...DEFAULT_CONFIGURATION.video, ...(defaults.video as object ?? {}), ...(source.video as object ?? {}) };
   const secondsPerImage = Number(merged.video.secondsPerImage);
-  merged.video.secondsPerImage = Number.isFinite(secondsPerImage) ? Math.max(0.5, Math.min(MAX_IMAGE_FRAME_DURATION_SECONDS, secondsPerImage)) : DEFAULT_CONFIGURATION.video.secondsPerImage;
+  merged.video.secondsPerImage = Number.isFinite(secondsPerImage) ? Math.max(MIN_FRAME_DURATION_SECONDS, Math.min(MAX_IMAGE_FRAME_DURATION_SECONDS, secondsPerImage)) : DEFAULT_CONFIGURATION.video.secondsPerImage;
   merged.totalFrames = Number.isInteger(merged.totalFrames) ? Math.max(1, Math.min(MAX_TOTAL_FRAMES, merged.totalFrames)) : DEFAULT_CONFIGURATION.totalFrames;
   merged.includeCover = Boolean(merged.includeCover);
   merged.includeCta = Boolean(merged.includeCta);
@@ -152,7 +152,7 @@ export function defaultFrameDuration(configuration: ContentConfiguration, mediaT
     const original = Number(originalDurationSeconds);
     if (Number.isFinite(original) && original > 0) return Math.round(original * 100) / 100;
   }
-  return Math.round(Math.max(0.5, Math.min(MAX_IMAGE_FRAME_DURATION_SECONDS, Number(configuration.video.secondsPerImage) || DEFAULT_CONFIGURATION.video.secondsPerImage)) * 100) / 100;
+  return Math.round(Math.max(MIN_FRAME_DURATION_SECONDS, Math.min(MAX_IMAGE_FRAME_DURATION_SECONDS, Number(configuration.video.secondsPerImage) || DEFAULT_CONFIGURATION.video.secondsPerImage)) * 100) / 100;
 }
 
 export function effectiveFrameDuration(value: unknown, configuration: ContentConfiguration, mediaType?: unknown, originalDurationSeconds?: unknown): number {

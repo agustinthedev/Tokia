@@ -2248,6 +2248,62 @@ export async function buildApp(
   );
 
   app.patch(
+    "/api/content/:id/frames/duration",
+    {
+      schema: {
+        tags: ["content"],
+        summary: "Set duration for unlocked image frames",
+      },
+    },
+    async (request, reply) => {
+      if (!integrationGuard(settings, request, reply)) return;
+      const { id } = request.params as { id: string };
+      const content = contentExists(id);
+      assertContentEditable(content);
+      if (content.type !== "video_slideshow")
+        throw new ContentValidationError(
+          "DURATION_NOT_SUPPORTED",
+          "Bulk frame duration is only available for video slideshows.",
+        );
+      const durationSeconds = normalizeFrameDuration(
+        bodyOf(request).durationSeconds,
+        content.configuration as ContentConfiguration,
+        "image",
+      );
+      const frames = db
+        .prepare(
+          "SELECT f.id, f.image_locked, a.media_type FROM content_frames f LEFT JOIN assets a ON a.id = f.source_media_id WHERE f.content_id = ? ORDER BY f.position",
+        )
+        .all(id) as Row[];
+      const timestamp = now();
+      let updatedFrameCount = 0;
+      db.transaction(() => {
+        for (const frame of frames) {
+          if (frame.image_locked || frame.media_type !== "image") continue;
+          const existing = db
+            .prepare("SELECT settings_json FROM content_frames WHERE id = ?")
+            .get(frame.id) as Row | undefined;
+          const frameSettings = {
+            ...parseJson<Row>(existing?.settings_json, {}),
+            durationSeconds,
+            durationCustomized: true,
+          };
+          db.prepare(
+            "UPDATE content_frames SET settings_json = ?, updated_at = ? WHERE id = ?",
+          ).run(JSON.stringify(frameSettings), timestamp, frame.id);
+          updatedFrameCount += 1;
+        }
+        if (updatedFrameCount > 0) {
+          db.prepare(
+            "UPDATE content_items SET version = version + 1, updated_at = ? WHERE id = ?",
+          ).run(timestamp, id);
+        }
+      })();
+      return reply.send(contentSnapshot(db, id));
+    },
+  );
+
+  app.patch(
     "/api/content/:id/frames/:frameId",
     {
       schema: { tags: ["content"], summary: "Edit or lock one content frame" },

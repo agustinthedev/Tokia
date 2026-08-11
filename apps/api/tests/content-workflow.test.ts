@@ -76,10 +76,19 @@ describe('project and content workflow', () => {
     expect(finalDownload.headers['content-disposition']).toMatch(/filename="[^"]+-slides\.zip"/);
     expect(finalDownload.body).toContain('slide-01.png');
     expect(finalDownload.body).toContain('slide-05.png');
-    const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 3, includeCover: true, includeCta: false, textMode: 'none', video: { secondsPerImage: 0.5, fps: 24, outputResolution: '720p' } } } });
+    const videoDraft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/content`, headers, payload: { type: 'video_slideshow', configuration: { sourceCollectionIds: [collectionId], totalFrames: 3, includeCover: true, includeCta: false, textMode: 'none', video: { secondsPerImage: 0.35, fps: 24, outputResolution: '720p' } } } });
     const videoId = videoDraft.json().id as string;
     const videoSelectedResponse = await app.inject({ method: 'POST', url: `/api/content/${videoId}/images/select`, headers, payload: {} });
-    expect(videoSelectedResponse.json().frames.map((frame: { durationSeconds: number }) => frame.durationSeconds)).toEqual([0.5, 0.5, 0.5]);
+    expect(videoSelectedResponse.json().configuration.video.secondsPerImage).toBe(0.35);
+    expect(videoSelectedResponse.json().frames.map((frame: { durationSeconds: number }) => frame.durationSeconds)).toEqual([0.35, 0.35, 0.35]);
+    const firstVideoFrame = videoSelectedResponse.json().frames[0];
+    const lockedDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoId}/frames/${firstVideoFrame.id}`, headers, payload: { durationSeconds: 0.7 } });
+    expect(lockedDuration.statusCode).toBe(200);
+    const lockedFrame = await app.inject({ method: 'PATCH', url: `/api/content/${videoId}/frames/${firstVideoFrame.id}`, headers, payload: { imageLocked: true } });
+    expect(lockedFrame.statusCode).toBe(200);
+    const bulkDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoId}/frames/duration`, headers, payload: { durationSeconds: 0.35 } });
+    expect(bulkDuration.statusCode).toBe(200);
+    expect(bulkDuration.json().frames.map((frame: { durationSeconds: number }) => frame.durationSeconds)).toEqual([0.7, 0.35, 0.35]);
     const videoDurations = [0.2, 0.4, 0.6];
     for (let index = 0; index < videoSelectedResponse.json().frames.length; index += 1) {
       const frame = videoSelectedResponse.json().frames[index];
