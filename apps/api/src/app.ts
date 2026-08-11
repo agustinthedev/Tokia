@@ -83,7 +83,7 @@ import {
 } from "./clipping-service.js";
 import { MediaProcessingError } from "./content-media.js";
 import { renderPreviewSegment } from "./clipping-media.js";
-import { convertHeicToJpeg } from "./image-conversion.js";
+import { convertHeicToJpeg, isHeicImageUrl } from "./image-conversion.js";
 
 type AppSettings = typeof defaultConfig;
 type QueryRecord = Record<string, string | undefined>;
@@ -132,7 +132,7 @@ function isPinterestCdnUrl(value: string | null | undefined): boolean {
   }
 }
 function isHeicImage(contentType: string | null, url: string): boolean {
-  return /image\/hei[cf]/i.test(contentType ?? "") || /\.(?:heic|heif)(?:[?#]|$)/i.test(url);
+  return /image\/hei[cf]/i.test(contentType ?? "") || isHeicImageUrl(url);
 }
 async function fetchRemoteVideo(url: string, request: FastifyRequest, referer: string | null): Promise<Response> {
   return fetch(url, { headers: remoteVideoRequestHeaders(request, referer) });

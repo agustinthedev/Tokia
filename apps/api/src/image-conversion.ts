@@ -10,6 +10,10 @@ export class ImageConversionError extends Error {
   }
 }
 
+export function isHeicImageUrl(value: string): boolean {
+  return /\.(?:heic|heif)(?:[?#]|$)/i.test(value);
+}
+
 function runConverter(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {

@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3';
 import { pinterestImageCandidates } from '@tokia/shared';
 import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameDuration, frameRoles, isMotionMedia, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
 import { contentDirectory, createThumbnail, downloadSource, MediaProcessingError, normalizeImage, renderSlideshow, sha256File, type SlideshowScene } from './content-media.js';
+import { convertHeicToJpeg, isHeicImageUrl } from './image-conversion.js';
 import { generateNarrative, validateNarrative, type Narrative } from './narrative.js';
 
 type Row = Record<string, any>;
@@ -25,6 +26,10 @@ async function downloadBestSource(url: string, destination: string): Promise<voi
   for (const candidate of pinterestImageCandidates(url)) {
     try {
       await downloadSource(candidate, destination);
+      if (isHeicImageUrl(candidate)) {
+        const converted = await convertHeicToJpeg(await fsp.readFile(destination));
+        await fsp.writeFile(destination, converted);
+      }
       return;
     } catch (error) {
       lastError = error;
