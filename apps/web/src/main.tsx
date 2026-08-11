@@ -3036,7 +3036,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const frameTrimMaximum = (frame: ContentFrame) => {
     const sourceDuration = frame.sourceMedia?.durationSeconds;
     const fallback = frame.endSeconds ?? frame.durationSeconds ?? 30;
-    return Math.max(0.1, sourceDuration && sourceDuration > 0 ? sourceDuration : fallback);
+    return sourceDuration && sourceDuration > 0 ? sourceDuration : Math.max(0.1, fallback);
   };
   const frameTrimMinimum = (frame: ContentFrame) => Math.min(0.1, frameTrimMaximum(frame));
   const frameTrimDraft = (frame: ContentFrame) => {
@@ -3464,7 +3464,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                     })
                   }
                 />
-                <small>Applied when the frames are first assigned. Video sources keep their original duration.</small>
+                <small>Applied when the frames are first assigned. Video sources start at their original duration and can be trimmed per scene.</small>
               </label>
             </div>
           )}
