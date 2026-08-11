@@ -171,6 +171,13 @@ describe('project and content workflow', () => {
     const videoContentId = videoDraft.json().id as string;
     const videoContentSelection = await app.inject({ method: 'POST', url: `/api/content/${videoContentId}/images/select`, headers, payload: { mediaIds: [videoAsset.id] } });
     expect(videoContentSelection.json().frames[0].durationSeconds).toBe(13);
+    expect(videoContentSelection.json().frames[0].muted).toBe(false);
+    const mutedFrame = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { muted: true } });
+    expect(mutedFrame.statusCode).toBe(200);
+    expect(mutedFrame.json().frames[0]).toMatchObject({ muted: true, settings: { muted: true } });
+    const unmutedFrame = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { muted: false } });
+    expect(unmutedFrame.statusCode).toBe(200);
+    expect(unmutedFrame.json().frames[0]).toMatchObject({ muted: false, settings: { muted: false } });
     const durationUpdate = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 2.1 } });
     expect(durationUpdate.statusCode).toBe(200);
     expect(durationUpdate.json().frames[0].durationSeconds).toBe(2.1);
