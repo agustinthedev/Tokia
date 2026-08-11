@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentFrameCount, defaultFrameDuration, frameDurationLimit, frameRoles, mergeConfiguration, normalizeFrameDuration } from '../src/content-model.js';
+import { contentFrameCount, defaultFrameDuration, effectiveFrameTrim, frameDurationLimit, frameRoles, mergeConfiguration, normalizeFrameDuration, normalizeFrameTrim } from '../src/content-model.js';
 import { generateNarrative, validateNarrative } from '../src/narrative.js';
 
 describe('content model and narrative contract', () => {
@@ -36,5 +36,15 @@ describe('content model and narrative contract', () => {
     expect(frameDurationLimit('video', 4.25)).toBe(4.25);
     expect(normalizeFrameDuration(2.1, configuration, 'video', 4.25)).toBe(2.1);
     expect(() => normalizeFrameDuration(4.3, configuration, 'video', 4.25)).toThrow('4.25');
+  });
+
+  it('normalizes a video trim range and derives its duration', () => {
+    expect(normalizeFrameTrim(1.25, 4.2, 'video', 5)).toEqual({ startSeconds: 1.25, endSeconds: 4.2, durationSeconds: 2.95 });
+    expect(effectiveFrameTrim({ startSeconds: 1.25, endSeconds: 4.2 }, mergeConfiguration({}), 'video', 5)).toEqual({ startSeconds: 1.25, endSeconds: 4.2, durationSeconds: 2.95 });
+  });
+
+  it('rejects video trim ranges whose handles cross or leave the source', () => {
+    expect(() => normalizeFrameTrim(3, 2.9, 'video', 5)).toThrow(/Video trim/);
+    expect(() => normalizeFrameTrim(0, 5.1, 'video', 5)).toThrow(/source video is 5.00 seconds long/);
   });
 });

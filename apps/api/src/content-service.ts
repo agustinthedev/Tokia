@@ -4,7 +4,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { pinterestImageCandidates } from '@tokia/shared';
-import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameDuration, frameRoles, isMotionMedia, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
+import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameTrim, frameRoles, isMotionMedia, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
 import { contentDirectory, createThumbnail, downloadSource, MediaProcessingError, normalizeImage, renderSlideshow, sha256File, type SlideshowScene } from './content-media.js';
 import { generateNarrative, validateNarrative, type Narrative } from './narrative.js';
 
@@ -51,10 +51,12 @@ export function contentSnapshot(db: Database.Database, contentId: string): Row |
     LEFT JOIN collection_assets ca ON ca.asset_id = a.id LEFT JOIN collections c ON c.id = ca.collection_id
     WHERE f.content_id = ? GROUP BY f.id ORDER BY f.position`).all(contentId) as Row[]).map((frame) => {
       const settings = parseJson<Row>(frame.settings_json, {});
-      const durationSeconds = row.type === 'video_slideshow' ? effectiveFrameDuration(settings.durationSeconds, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
+      const trim = row.type === 'video_slideshow' ? effectiveFrameTrim(settings, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
+      const durationSeconds = trim?.durationSeconds ?? null;
       return {
         id: frame.id, position: frame.position, role: frame.role, headline: frame.headline, body: frame.body,
-        durationSeconds, textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), settings,
+        durationSeconds, startSeconds: trim && isMotionMedia(frame.source_media_type) ? trim.startSeconds : null, endSeconds: trim && isMotionMedia(frame.source_media_type) ? trim.endSeconds : null,
+        textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), settings,
         sourceMedia: frame.source_media_id ? { id: frame.source_media_id, externalId: frame.external_asset_id, imageUrl: frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url, previewUrl: frame.remote_preview_url, mediaUrl: frame.remote_media_url ?? frame.remote_preview_url ?? frame.remote_image_url, width: frame.source_width, height: frame.source_height, durationSeconds: frame.source_duration_seconds, mediaType: frame.source_media_type, title: frame.source_title, altText: frame.source_alt_text, collectionName: frame.source_collection_name } : null
       };
     });
@@ -201,7 +203,8 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
     if (!sourceUrl) throw new MediaProcessingError('SOURCE_MEDIA_MISSING', `Source media is missing for frame ${index + 1}.`);
     const sourceKey = String(frame.source_media_id).replace(/[^a-zA-Z0-9_-]/g, '');
     const frameSettings = parseJson<Row>(frame.settings_json, {});
-    const durationSeconds = row.type === 'video_slideshow' ? effectiveFrameDuration(frameSettings.durationSeconds, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
+    const trim = row.type === 'video_slideshow' ? effectiveFrameTrim(frameSettings, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
+    const durationSeconds = trim?.durationSeconds ?? null;
     const sourcePath = motionSource ? path.join(directory, `motion-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.media`) : null;
     if (sourcePath && !fs.existsSync(sourcePath)) await downloadSource(sourceUrl, sourcePath);
     const normalizedPath = path.join(directory, `source-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.png`);
@@ -220,7 +223,7 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
     const dimensions = await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: normalizedPath, outputPath, configuration, text });
     renderedPaths.push(outputPath);
     if (row.type === 'video_slideshow') {
-      scenes.push({ path: sourcePath ?? outputPath, mediaType: sourcePath ? 'video' : 'image', durationSeconds: durationSeconds ?? configuration.video.secondsPerImage, text: sourcePath ? text : null });
+      scenes.push({ path: sourcePath ?? outputPath, mediaType: sourcePath ? 'video' : 'image', durationSeconds: durationSeconds ?? configuration.video.secondsPerImage, startSeconds: sourcePath ? trim?.startSeconds : undefined, endSeconds: sourcePath ? trim?.endSeconds : undefined, text: sourcePath ? text : null });
     }
     const hash = await sha256File(outputPath);
     db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, sha256, metadata_json, created_at)

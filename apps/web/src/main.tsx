@@ -141,6 +141,8 @@ interface ContentFrame {
   headline?: string | null;
   body?: string | null;
   durationSeconds?: number | null;
+  startSeconds?: number | null;
+  endSeconds?: number | null;
   textLocked: boolean;
   imageLocked: boolean;
   sourceMedia?: Asset | null;
@@ -301,6 +303,9 @@ function duration(value?: number): string {
     .toString()
     .padStart(2, "0");
   return `${mins}:${seconds}`;
+}
+function preciseDuration(value: number): string {
+  return `${Math.floor(value / 60)}:${(value % 60).toFixed(2).padStart(5, "0")}`;
 }
 function cleanAssetLabel(value?: string): string | null {
   const normalized = value?.replace(/\s+/g, " ").trim();
@@ -2698,6 +2703,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   });
   const [content, setContent] = useState<ContentDetail | null>(null);
   const [durationDrafts, setDurationDrafts] = useState<Record<string, string>>({});
+  const [trimDrafts, setTrimDrafts] = useState<Record<string, { start: string; end: string }>>({});
   const [bulkDurationDraft, setBulkDurationDraft] = useState("2.5");
   const [previewPolling, setPreviewPolling] = useState(false);
   const captionDraft = useRef("");
@@ -2899,6 +2905,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/images/select`, { method: "POST", body: JSON.stringify({}) }));
       setDurationDrafts({});
+      setTrimDrafts({});
       setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not select images");
@@ -2912,6 +2919,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
     try {
       setContent(await request<ContentDetail>(`/api/content/${content.id}/images/shuffle`, { method: "POST", body: JSON.stringify({}) }));
       setDurationDrafts({});
+      setTrimDrafts({});
       setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not shuffle images");
@@ -2978,6 +2986,11 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         },
       );
       setContent(updated);
+      setTrimDrafts((current) => {
+        const next = { ...current };
+        delete next[frame.id];
+        return next;
+      });
       setSourcePickerFrameId(null);
       setSourceSearch("");
       closeSourcePreview();
@@ -3019,6 +3032,65 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const frameDurationMaximum = (frame: ContentFrame) => {
     const source = frame.sourceMedia;
     return source && (source.mediaType === "video" || source.mediaType === "animated") && source.durationSeconds && source.durationSeconds > 0 ? source.durationSeconds : 30;
+  };
+  const frameTrimMaximum = (frame: ContentFrame) => {
+    const sourceDuration = frame.sourceMedia?.durationSeconds;
+    const fallback = frame.endSeconds ?? frame.durationSeconds ?? 30;
+    return Math.max(0.1, sourceDuration && sourceDuration > 0 ? sourceDuration : fallback);
+  };
+  const frameTrimMinimum = (frame: ContentFrame) => Math.min(0.1, frameTrimMaximum(frame));
+  const frameTrimDraft = (frame: ContentFrame) => {
+    const maximum = frameTrimMaximum(frame);
+    return trimDrafts[frame.id] ?? {
+      start: String(frame.startSeconds ?? 0),
+      end: String(frame.endSeconds ?? maximum),
+    };
+  };
+  const updateFrameTrimDraft = (frame: ContentFrame, field: "start" | "end", rawValue: string) => {
+    const maximum = frameTrimMaximum(frame);
+    const minimum = frameTrimMinimum(frame);
+    const current = frameTrimDraft(frame);
+    const currentStart = Number(current.start) || 0;
+    const currentEnd = Number(current.end) || maximum;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    const nextStart = field === "start" ? Math.max(0, Math.min(value, Math.max(0, currentEnd - minimum))) : currentStart;
+    const nextEnd = field === "end" ? Math.min(maximum, Math.max(value, Math.min(maximum, currentStart + minimum))) : currentEnd;
+    setDirty(true);
+    setTrimDrafts((drafts) => ({
+      ...drafts,
+      [frame.id]: {
+        start: nextStart.toFixed(2),
+        end: nextEnd.toFixed(2),
+      },
+    }));
+  };
+  const saveFrameTrim = async (frame: ContentFrame) => {
+    if (!content || !trimDrafts[frame.id]) return;
+    const draft = frameTrimDraft(frame);
+    const start = Number(draft.start);
+    const end = Number(draft.end);
+    const maximum = frameTrimMaximum(frame);
+    const minimum = frameTrimMinimum(frame);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > maximum || end - start < minimum) {
+      setError("Choose a valid video range.");
+      return;
+    }
+    try {
+      setContent(await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ startSeconds: start, endSeconds: end }),
+      }));
+      setDirty(false);
+      setTrimDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[frame.id];
+        return next;
+      });
+      setError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save video range");
+    }
   };
   const saveFrameDuration = async (frame: ContentFrame) => {
     if (!content || durationDrafts[frame.id] === undefined) return;
@@ -3501,36 +3573,81 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                   </span>
                 </div>
                 {type === "video_slideshow" && (
-                  <label className="frame-duration-control">
-                    <span>Duration</span>
-                    <div className="frame-duration-input">
-                      <input
-                        type="number"
-                        min="0.1"
-                        max={frameDurationMaximum(frame)}
-                        step="0.05"
-                        value={durationDrafts[frame.id] ?? String(frame.durationSeconds ?? config.video?.secondsPerImage ?? 2.5)}
-                        onChange={(event) => {
-                          setDirty(true);
-                          setDurationDrafts((current) => ({ ...current, [frame.id]: event.target.value }));
-                        }}
-                        onBlur={() => void saveFrameDuration(frame)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            event.currentTarget.blur();
-                          }
-                        }}
-                        aria-label={`Duration for frame ${frame.position}`}
-                      />
-                      <span>s</span>
-                    </div>
-                    <small>
-                      {frame.sourceMedia?.durationSeconds && (frame.sourceMedia.mediaType === "video" || frame.sourceMedia.mediaType === "animated")
-                        ? `Original ${frame.sourceMedia.durationSeconds.toFixed(2)}s · trim only`
-                        : `Default ${Number(config.video?.secondsPerImage ?? 2.5).toFixed(1)}s`}
-                    </small>
-                  </label>
+                  frame.sourceMedia?.mediaType === "video" || frame.sourceMedia?.mediaType === "animated" ? (() => {
+                    const maximum = frameTrimMaximum(frame);
+                    const minimum = frameTrimMinimum(frame);
+                    const draft = frameTrimDraft(frame);
+                    const start = Math.max(0, Math.min(Number(draft.start) || 0, Math.max(0, maximum - minimum)));
+                    const end = Math.min(maximum, Math.max(Number(draft.end) || maximum, Math.min(maximum, start + minimum)));
+                    const startPercent = maximum ? (start / maximum) * 100 : 0;
+                    const endPercent = maximum ? (end / maximum) * 100 : 100;
+                    return (
+                      <div className="frame-duration-control frame-trim-control">
+                        <span>Video range</span>
+                        <div className="frame-trim-editor">
+                          <div className="frame-trim-slider" style={{ "--trim-start": `${startPercent}%`, "--trim-end": `${endPercent}%` } as CSSProperties}>
+                            <div className="frame-trim-track" />
+                            <div className="frame-trim-selection" />
+                            <input
+                              className="frame-trim-range frame-trim-start"
+                              type="range"
+                              min="0"
+                              max={Math.max(0, end - minimum)}
+                              step="0.01"
+                              value={start}
+                              onChange={(event) => updateFrameTrimDraft(frame, "start", event.target.value)}
+                              onBlur={() => void saveFrameTrim(frame)}
+                              onPointerUp={() => void saveFrameTrim(frame)}
+                              onKeyUp={() => void saveFrameTrim(frame)}
+                              aria-label={`Video start for frame ${frame.position}`}
+                            />
+                            <input
+                              className="frame-trim-range frame-trim-end"
+                              type="range"
+                              min={Math.min(maximum, start + minimum)}
+                              max={maximum}
+                              step="0.01"
+                              value={end}
+                              onChange={(event) => updateFrameTrimDraft(frame, "end", event.target.value)}
+                              onBlur={() => void saveFrameTrim(frame)}
+                              onPointerUp={() => void saveFrameTrim(frame)}
+                              onKeyUp={() => void saveFrameTrim(frame)}
+                              aria-label={`Video end for frame ${frame.position}`}
+                            />
+                          </div>
+                          <div className="frame-trim-times"><span>{preciseDuration(start)}</span><span>{preciseDuration(end)} / {preciseDuration(maximum)}</span></div>
+                        </div>
+                        <small>{frame.sourceMedia.durationSeconds ? `Original ${frame.sourceMedia.durationSeconds.toFixed(2)}s · drag both handles` : "Original duration unavailable"}</small>
+                      </div>
+                    );
+                  })() : (
+                    <label className="frame-duration-control">
+                      <span>Duration</span>
+                      <div className="frame-duration-input">
+                        <input
+                          type="number"
+                          min="0.1"
+                          max={frameDurationMaximum(frame)}
+                          step="0.05"
+                          value={durationDrafts[frame.id] ?? String(frame.durationSeconds ?? config.video?.secondsPerImage ?? 2.5)}
+                          onChange={(event) => {
+                            setDirty(true);
+                            setDurationDrafts((current) => ({ ...current, [frame.id]: event.target.value }));
+                          }}
+                          onBlur={() => void saveFrameDuration(frame)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                          }}
+                          aria-label={`Duration for frame ${frame.position}`}
+                        />
+                        <span>s</span>
+                      </div>
+                      <small>{`Default ${Number(config.video?.secondsPerImage ?? 2.5).toFixed(1)}s`}</small>
+                    </label>
+                  )
                 )}
                 <button
                   type="button"
@@ -3599,7 +3716,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               </div>
             ))}
           </div>
-          <p className="wizard-help">Content is linked to the original collection records. Source previews stay visible so you can replace them before rendering.{type === "video_slideshow" ? " Set each scene duration here; images use the global default and videos start at their original length." : ""}</p>
+          <p className="wizard-help">Content is linked to the original collection records. Source previews stay visible so you can replace them before rendering.{type === "video_slideshow" ? " Set image durations here; use the two handles on video sources to choose the section to keep." : ""}</p>
         </div>
       )}
       {step === 5 && (

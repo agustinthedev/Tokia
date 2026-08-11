@@ -10,6 +10,12 @@ export const MAX_TOTAL_FRAMES = 100;
 export const MIN_FRAME_DURATION_SECONDS = 0.1;
 export const MAX_IMAGE_FRAME_DURATION_SECONDS = 30;
 
+export interface FrameTrim {
+  startSeconds: number;
+  endSeconds: number;
+  durationSeconds: number;
+}
+
 export interface ContentConfiguration {
   sourceCollectionIds: string[];
   aspectRatio: '9:16' | '1:1' | '4:5' | '16:9';
@@ -172,6 +178,43 @@ export function normalizeFrameDuration(value: unknown, configuration: ContentCon
     throw new ContentValidationError('INVALID_FRAME_DURATION', `Frame duration must be between ${minimum.toFixed(2)} and ${maximum.toFixed(2)} seconds.${suffix}`);
   }
   return Math.round(duration * 100) / 100;
+}
+
+function rounded(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export function normalizeFrameTrim(startValue: unknown, endValue: unknown, mediaType: unknown, originalDurationSeconds: unknown): FrameTrim {
+  const maximum = frameDurationLimit(mediaType, originalDurationSeconds);
+  const minimum = Math.min(MIN_FRAME_DURATION_SECONDS, maximum);
+  const start = Number(startValue);
+  const end = Number(endValue);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > maximum || end - start < minimum) {
+    const suffix = isMotionMedia(mediaType) && Number.isFinite(Number(originalDurationSeconds)) ? ` The source video is ${maximum.toFixed(2)} seconds long.` : '';
+    throw new ContentValidationError('INVALID_FRAME_TRIM', `Video trim must start at or after 0, end at or before ${maximum.toFixed(2)} seconds, and keep at least ${minimum.toFixed(2)} seconds.${suffix}`);
+  }
+  return {
+    startSeconds: rounded(start),
+    endSeconds: rounded(end),
+    durationSeconds: rounded(end - start),
+  };
+}
+
+export function effectiveFrameTrim(settings: unknown, configuration: ContentConfiguration, mediaType?: unknown, originalDurationSeconds?: unknown): FrameTrim {
+  const source = (settings && typeof settings === 'object' ? settings : {}) as Record<string, unknown>;
+  const maximum = frameDurationLimit(mediaType, originalDurationSeconds);
+  const minimum = Math.min(MIN_FRAME_DURATION_SECONDS, maximum);
+  const start = Number(source.startSeconds);
+  const end = Number(source.endSeconds);
+  if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end <= maximum && end - start >= minimum) {
+    return {
+      startSeconds: rounded(start),
+      endSeconds: rounded(end),
+      durationSeconds: rounded(end - start),
+    };
+  }
+  const duration = effectiveFrameDuration(source.durationSeconds, configuration, mediaType, originalDurationSeconds);
+  return { startSeconds: 0, endSeconds: duration, durationSeconds: duration };
 }
 
 export function assertContentType(value: unknown): ContentType {
