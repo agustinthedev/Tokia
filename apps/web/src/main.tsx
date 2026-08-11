@@ -5,6 +5,7 @@ import { bindPreviewGallery } from "./preview-gallery";
 import "./styles.css";
 import { AiProvidersPage } from "./AiProvidersPage";
 import { ClippingWizard } from "./ClippingWizard";
+import { DEFAULT_PREVIEW_PLAYBACK_MODE, shouldLoopPreview, type PreviewPlaybackMode } from "./preview-playback";
 import { API_BASE, apiRequest, getIntegrationToken, setApiBase, setIntegrationToken } from "./api-client";
 import "./clipping.css";
 import "./saas-theme.css";
@@ -2719,6 +2720,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const [detectedVideoDurations, setDetectedVideoDurations] = useState<Record<string, number>>({});
   const [bulkDurationDraft, setBulkDurationDraft] = useState("2.5");
   const [previewPolling, setPreviewPolling] = useState(false);
+  const [previewPlaybackMode, setPreviewPlaybackMode] = useState<PreviewPlaybackMode>(DEFAULT_PREVIEW_PLAYBACK_MODE);
   const captionDraft = useRef("");
   const captionContentId = useRef<string | undefined>(undefined);
   const sourcePreviewRequest = useRef(0);
@@ -4120,6 +4122,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                   <video
                     src={`${API_BASE}${previewAsset.previewUrl}`}
                     controls
+                    loop={shouldLoopPreview(previewPlaybackMode)}
                     playsInline
                     preload="metadata"
                     aria-label="Generated video preview"
@@ -4132,6 +4135,19 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               <div className="preview-meta">
                 <StatusBadge value={content?.status ?? "draft"} />
                 <p>{content?.type === "carousel" ? `${content.frames.length} independent slides` : content?.type === "video_slideshow" ? "MP4 slideshow preview" : "Single image preview"}</p>
+                {content?.type === "video_slideshow" && (
+                  <label className="toggle-row preview-playback-toggle">
+                    <input
+                      type="checkbox"
+                      checked={previewPlaybackMode === "loop"}
+                      onChange={(event) => setPreviewPlaybackMode(event.target.checked ? "loop" : "normal")}
+                    />
+                    <span>
+                      <strong>Loop preview</strong>
+                      <small>{previewPlaybackMode === "loop" ? "Starts again automatically at the end." : "Pauses when it reaches the end."}</small>
+                    </span>
+                  </label>
+                )}
                 {content?.type === "carousel" && (
                   <div className="preview-strip">
                     {content.assets
