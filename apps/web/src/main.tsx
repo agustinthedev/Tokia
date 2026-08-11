@@ -451,7 +451,9 @@ function StatusBadge({ value }: { value: string }): ReactElement {
 
 function MediaPreview({ asset, detail = false, onImageLoad }: { asset: Asset; detail?: boolean; onImageLoad?: (size: { width: number; height: number }) => void }): ReactElement {
   const [sourceIndex, setSourceIndex] = useState(0);
-  useEffect(() => setSourceIndex(0), [asset.id]);
+  const [playbackFailed, setPlaybackFailed] = useState(false);
+  useEffect(() => setSourceIndex(0), [asset.id, asset.mediaUrl, asset.remotePreviewUrl, asset.remoteImageUrl, asset.thumbnailUrl, asset.imageUrl]);
+  useEffect(() => setPlaybackFailed(false), [asset.id, asset.mediaUrl]);
   const imageSources = Array.from(new Set((asset.mediaType === "video" ? [asset.remotePreviewUrl, asset.previewUrl, asset.thumbnailUrl, asset.remoteImageUrl, asset.imageUrl] : [asset.remoteImageUrl, asset.mediaUrl, asset.previewUrl, asset.remotePreviewUrl, asset.thumbnailUrl, asset.imageUrl]).filter((value): value is string => Boolean(value))));
   const image = imageSources[sourceIndex];
   const videoSource = asset.mediaType === "video" && asset.mediaUrl ? asset.mediaUrl : undefined;
@@ -469,7 +471,7 @@ function MediaPreview({ asset, detail = false, onImageLoad }: { asset: Asset; de
         ) : (
           <div className="media-fallback">
             <Icon name="video" />
-            <span>Video preview unavailable</span>
+            <span>{videoSource ? "Video poster unavailable" : "Video preview unavailable"}</span>
           </div>
         )}
         <span className="play-badge">
@@ -477,9 +479,16 @@ function MediaPreview({ asset, detail = false, onImageLoad }: { asset: Asset; de
         </span>
         {asset.durationSeconds != null && <span className="duration-badge">{duration(asset.durationSeconds)}</span>}
         {detail && videoSource && (
-          <video controls preload="metadata" poster={image} onError={handleImageError}>
-            <source src={videoSource} type={asset.mimeType || undefined} />
-          </video>
+          playbackFailed ? (
+            <div className="media-fallback media-playback-fallback">
+              <Icon name="alert" />
+              <span>Video playback unavailable</span>
+            </div>
+          ) : (
+            <video controls preload="metadata" poster={image} onError={() => setPlaybackFailed(true)}>
+              <source src={videoSource} type={asset.mimeType || undefined} />
+            </video>
+          )
         )}
       </div>
     );
@@ -2691,12 +2700,15 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const [previewPolling, setPreviewPolling] = useState(false);
   const captionDraft = useRef("");
   const captionContentId = useRef<string | undefined>(undefined);
+  const sourcePreviewRequest = useRef(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [sourcePickerFrameId, setSourcePickerFrameId] = useState<string | null>(null);
   const [sourceSearch, setSourceSearch] = useState("");
   const [sourcePreview, setSourcePreview] = useState<{ frame: ContentFrame; asset: Asset } | null>(null);
+  const [sourcePreviewLoading, setSourcePreviewLoading] = useState(false);
+  const [sourcePreviewError, setSourcePreviewError] = useState("");
   const sourcePickerPath =
     sourcePickerFrameId && selectedCollections.length
       ? `/api/assets?mediaType=source&pageSize=100&collectionIds=${encodeURIComponent(selectedCollections.join(","))}${sourceSearch.trim() ? `&search=${encodeURIComponent(sourceSearch.trim())}` : ""}`
@@ -2914,6 +2926,38 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
     setSourcePickerFrameId((current) => (current === frameId ? null : frameId));
     setSourceSearch("");
     setSourcePreview(null);
+    setSourcePreviewLoading(false);
+    setSourcePreviewError("");
+  };
+  const previewSourceForFrame = async (frame: ContentFrame, asset: Asset) => {
+    const requestId = sourcePreviewRequest.current + 1;
+    sourcePreviewRequest.current = requestId;
+    setSourcePreview({ frame, asset });
+    setSourcePreviewError("");
+    if (asset.mediaType !== "video" || asset.mediaUrl) {
+      setSourcePreviewLoading(false);
+      return;
+    }
+    setSourcePreviewLoading(true);
+    try {
+      const resolved = await request<Asset>(`/api/assets/${asset.id}/resolve-media`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (sourcePreviewRequest.current === requestId) setSourcePreview({ frame, asset: resolved });
+    } catch (caught) {
+      if (sourcePreviewRequest.current === requestId) {
+        setSourcePreviewError(caught instanceof Error ? caught.message : "Could not resolve video media");
+      }
+    } finally {
+      if (sourcePreviewRequest.current === requestId) setSourcePreviewLoading(false);
+    }
+  };
+  const closeSourcePreview = () => {
+    sourcePreviewRequest.current += 1;
+    setSourcePreview(null);
+    setSourcePreviewLoading(false);
+    setSourcePreviewError("");
   };
   const chooseSourceForFrame = async (frame: ContentFrame, asset: Asset) => {
     if (!content) return;
@@ -2930,7 +2974,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       setContent(updated);
       setSourcePickerFrameId(null);
       setSourceSearch("");
-      setSourcePreview(null);
+      closeSourcePreview();
       setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not select source content");
@@ -3516,7 +3560,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                             <button
                               type="button"
                               className="frame-source-option-thumb"
-                              onClick={() => setSourcePreview({ frame, asset })}
+                              onClick={() => void previewSourceForFrame(frame, asset)}
                               aria-label={`Preview ${asset.title ?? asset.externalId ?? "content"}`}
                               title="Preview content"
                             >
@@ -3903,7 +3947,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       </div>
       </Modal>
       {sourcePreview && (
-        <Modal title="Preview content" onClose={() => setSourcePreview(null)} wide>
+        <Modal title="Preview content" onClose={closeSourcePreview} wide>
           <div className="source-preview-modal">
             <div className="source-preview-media">
               <MediaPreview asset={sourcePreview.asset} detail />
@@ -3912,6 +3956,8 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               <div className="eyebrow">Slot {sourcePreview.frame.position}</div>
               <h3>{sourcePreview.asset.title ?? sourcePreview.asset.externalId ?? "Untitled asset"}</h3>
               <p>Review this content at full size before assigning it to the slot.</p>
+              {sourcePreviewLoading && <div className="inline-note">Resolving the Pinterest video source…</div>}
+              {sourcePreviewError && <div className="inline-error">{sourcePreviewError}</div>}
               <div className="metadata-list">
                 <div>
                   <span>Pin ID</span>
@@ -3927,12 +3973,12 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                 </div>
               </div>
               <div className="source-preview-actions">
-                <Button onClick={() => setSourcePreview(null)}>Close preview</Button>
+                <Button onClick={closeSourcePreview}>Close preview</Button>
                 <Button
                   variant="primary"
                   onClick={() => {
                     const selection = sourcePreview;
-                    setSourcePreview(null);
+                    closeSourcePreview();
                     void chooseSourceForFrame(selection.frame, selection.asset);
                   }}
                 >
