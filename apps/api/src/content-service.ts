@@ -11,7 +11,7 @@ import { generateNarrative, validateNarrative, type Narrative } from './narrativ
 
 type Row = Record<string, any>;
 type JobType = 'narrative_generation' | 'caption_regeneration' | 'frame_regeneration' | 'image_normalization' | 'preview_render' | 'final_render' | 'package_generation';
-type Settings = { contentStorageDirectory: string; ffmpegPath: string; modelProvider: string; modelName: string };
+type Settings = { contentStorageDirectory: string; ffmpegPath: string; ffprobePath: string; modelProvider: string; modelName: string };
 
 function now(): string { return new Date().toISOString(); }
 function id(): string { return crypto.randomUUID(); }
@@ -70,7 +70,7 @@ export function contentSnapshot(db: Database.Database, contentId: string): Row |
       return {
         id: frame.id, position: frame.position, role: frame.role, headline: frame.headline, body: frame.body,
         durationSeconds, startSeconds: trim ? trim.startSeconds : null, endSeconds: trim ? trim.endSeconds : null,
-        textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), settings,
+        textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), muted: settings.muted === true, settings,
         sourceMedia: frame.source_media_id ? { id: frame.source_media_id, externalId: frame.external_asset_id, imageUrl: frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url, previewUrl: frame.remote_preview_url, mediaUrl: frame.remote_media_url ?? frame.remote_preview_url ?? frame.remote_image_url, width: frame.source_width, height: frame.source_height, durationSeconds: frame.source_duration_seconds, mediaType: sourceMediaType, title: frame.source_title, altText: frame.source_alt_text, collectionName: frame.source_collection_name } : null
       };
     });
@@ -241,7 +241,7 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
     const dimensions = await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: normalizedPath, outputPath, configuration, text });
     renderedPaths.push(outputPath);
     if (row.type === 'video_slideshow') {
-      scenes.push({ path: sourcePath ?? outputPath, mediaType: sourcePath ? 'video' : 'image', durationSeconds: durationSeconds ?? configuration.video.secondsPerImage, startSeconds: sourcePath ? trim?.startSeconds : undefined, endSeconds: sourcePath ? trim?.endSeconds : undefined, text: sourcePath ? text : null });
+      scenes.push({ path: sourcePath ?? outputPath, mediaType: sourcePath ? 'video' : 'image', durationSeconds: durationSeconds ?? configuration.video.secondsPerImage, startSeconds: sourcePath ? trim?.startSeconds : undefined, endSeconds: sourcePath ? trim?.endSeconds : undefined, muted: sourcePath ? frameSettings.muted === true : false, text: sourcePath ? text : null });
     }
     const hash = await sha256File(outputPath);
     db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, sha256, metadata_json, created_at)
@@ -251,9 +251,9 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
   let video: { width: number; height: number; durationMs: number } | null = null;
   if (row.type === 'video_slideshow') {
     videoPath = path.join(directory, `${variant}.mp4`);
-    video = await renderSlideshow({ ffmpegPath: settings.ffmpegPath, scenes, outputPath: videoPath, configuration });
+    video = await renderSlideshow({ ffmpegPath: settings.ffmpegPath, ffprobePath: settings.ffprobePath, scenes, outputPath: videoPath, configuration });
     db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, duration_ms, sha256, metadata_json, created_at)
-      VALUES (?, ?, NULL, 'video', ?, 'ready', ?, 'video/mp4', ?, ?, ?, ?, ?, ?)`).run(id(), contentId, variant, videoPath, video.width, video.height, video.durationMs, await sha256File(videoPath), JSON.stringify({ fps: configuration.video.fps, secondsPerImage: configuration.video.secondsPerImage, sceneDurations: scenes.map((scene) => scene.durationSeconds), sourceTypes: scenes.map((scene) => scene.mediaType) }), timestamp);
+      VALUES (?, ?, NULL, 'video', ?, 'ready', ?, 'video/mp4', ?, ?, ?, ?, ?, ?)`).run(id(), contentId, variant, videoPath, video.width, video.height, video.durationMs, await sha256File(videoPath), JSON.stringify({ fps: configuration.video.fps, secondsPerImage: configuration.video.secondsPerImage, sceneDurations: scenes.map((scene) => scene.durationSeconds), sourceTypes: scenes.map((scene) => scene.mediaType), mutedScenes: scenes.map((scene) => scene.muted === true) }), timestamp);
   }
   const first = videoPath ?? renderedPaths[0]; if (!first) throw new MediaProcessingError('NO_RENDERED_ASSET', 'No rendered frame was created.');
   const thumbnailPath = path.join(directory, `${variant}-thumbnail.webp`);

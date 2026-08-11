@@ -145,6 +145,7 @@ interface ContentFrame {
   endSeconds?: number | null;
   textLocked: boolean;
   imageLocked: boolean;
+  muted?: boolean;
   settings?: AnyRecord;
   sourceMedia?: Asset | null;
 }
@@ -388,6 +389,8 @@ function Icon({ name }: { name: string }): ReactElement {
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     image: <><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m7 16 3-3 2 2 2-3 3 4" /><circle cx="9" cy="9" r="1" /></>,
     video: <><rect x="4" y="6" width="13" height="12" rx="2" /><path d="m17 10 3-2v8l-3-2z" /></>,
+    "volume-on": <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11" /></>,
+    "volume-off": <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="m17 9 4 6m0-6-4 6" /></>,
     "lock-open": <><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 7.6-1.8" /></>,
     "lock-closed": <><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
     "chevron-up": <path d="m6 15 6-6 6 6" />,
@@ -2952,6 +2955,18 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       setError(caught instanceof Error ? caught.message : "Could not update lock");
     }
   };
+  const toggleFrameMute = async (frame: ContentFrame) => {
+    if (!content || !frame.sourceMedia || (frame.sourceMedia.mediaType !== "video" && frame.sourceMedia.mediaType !== "animated")) return;
+    try {
+      setContent(await request<ContentDetail>(`/api/content/${content.id}/frames/${frame.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ muted: !frame.muted }),
+      }));
+      setDirty(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update video audio");
+    }
+  };
   const toggleSourcePicker = (frameId: string) => {
     setSourcePickerFrameId((current) => (current === frameId ? null : frameId));
     setSourceSearch("");
@@ -3740,6 +3755,20 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                     </label>
                   )
                 )}
+                {type === "video_slideshow" && (frame.sourceMedia?.mediaType === "video" || frame.sourceMedia?.mediaType === "animated") && (
+                  <button
+                    type="button"
+                    className={`frame-icon-button frame-audio-button ${frame.muted ? "is-muted" : "is-unmuted"}`}
+                    data-no-frame-drag
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onDragStart={(event) => event.preventDefault()}
+                    onClick={() => void toggleFrameMute(frame)}
+                    title={frame.muted ? "Enable video audio" : "Mute video audio"}
+                    aria-label={frame.muted ? `Enable audio for video frame ${frame.position}` : `Mute audio for video frame ${frame.position}`}
+                  >
+                    <Icon name={frame.muted ? "volume-off" : "volume-on"} />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="frame-icon-button frame-picker-button"
@@ -3807,7 +3836,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               </div>
             ))}
           </div>
-          <p className="wizard-help">Content is linked to the original collection records. Source previews stay visible so you can replace them before rendering.{type === "video_slideshow" ? " Set image durations here; use the two handles on video sources to choose the section to keep." : ""}</p>
+          <p className="wizard-help">Content is linked to the original collection records. Source previews stay visible so you can replace them before rendering.{type === "video_slideshow" ? " Set image durations here; use the two handles on video sources to choose the section to keep. Video audio is enabled by default; use the speaker button to mute individual clips." : ""}</p>
         </div>
       )}
       {step === 5 && (
