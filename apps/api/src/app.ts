@@ -16,6 +16,7 @@ import {
   assetStatusSchema,
   collectionStatusSchema,
   isPlayableVideoUrl,
+  pinterestImageCandidates,
   promoteToLargestPinterestImage,
 } from "@tokia/shared";
 import {
@@ -120,7 +121,7 @@ function remoteVideoRequestHeaders(request: FastifyRequest, referer: string | nu
   headers.set("Referer", referer ?? "https://www.pinterest.com/");
   return headers;
 }
-function isPinterestMediaUrl(value: string | null | undefined): boolean {
+function isPinterestCdnUrl(value: string | null | undefined): boolean {
   if (!value) return false;
   try {
     const hostname = new URL(value).hostname.toLowerCase();
@@ -131,6 +132,16 @@ function isPinterestMediaUrl(value: string | null | undefined): boolean {
 }
 async function fetchRemoteVideo(url: string, request: FastifyRequest, referer: string | null): Promise<Response> {
   return fetch(url, { headers: remoteVideoRequestHeaders(request, referer) });
+}
+function remoteImageRequestHeaders(referer: string | null): Headers {
+  return new Headers({
+    Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 Tokia local media proxy",
+    Referer: referer ?? "https://www.pinterest.com/",
+  });
+}
+async function fetchRemoteImage(url: string, referer: string | null): Promise<Response> {
+  return fetch(url, { headers: remoteImageRequestHeaders(referer) });
 }
 function persistResolvedVideo(db: Database.Database, assetId: string, resolved: { mediaUrl: string; posterUrl: string | null; mimeType: string | null; durationSeconds: number | null }): void {
   db.prepare(
@@ -1422,12 +1433,12 @@ export async function buildApp(
         });
 
       const referer = typeof row.canonical_asset_url === "string" ? row.canonical_asset_url : null;
-      let mediaUrl = isPlayableVideoUrl(row.remote_media_url) && isPinterestMediaUrl(row.remote_media_url) ? row.remote_media_url : null;
+      let mediaUrl = isPlayableVideoUrl(row.remote_media_url) && isPinterestCdnUrl(row.remote_media_url) ? row.remote_media_url : null;
       let upstream = mediaUrl ? await fetchRemoteVideo(mediaUrl, request, referer) : null;
       const shouldRefresh = !upstream || [401, 403, 404].includes(upstream.status);
       if (shouldRefresh && typeof row.canonical_asset_url === "string" && row.canonical_asset_url) {
         const resolved = await resolvePinterestVideo(row.canonical_asset_url);
-        if (resolved.mediaUrl && isPlayableVideoUrl(resolved.mediaUrl) && isPinterestMediaUrl(resolved.mediaUrl)) {
+        if (resolved.mediaUrl && isPlayableVideoUrl(resolved.mediaUrl) && isPinterestCdnUrl(resolved.mediaUrl)) {
           persistResolvedVideo(db, id, {
             mediaUrl: resolved.mediaUrl,
             posterUrl: resolved.posterUrl,
@@ -1452,6 +1463,52 @@ export async function buildApp(
       if (contentLength) response.header("Content-Length", contentLength);
       if (contentRange) response.header("Content-Range", contentRange);
       if (acceptRanges) response.header("Accept-Ranges", acceptRanges);
+      return response.send(Readable.fromWeb(upstream.body as any));
+    },
+  );
+
+  app.get(
+    "/api/assets/:id/image",
+    { schema: { tags: ["assets"], summary: "Stream a Pinterest image through the local API" } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const row = db.prepare("SELECT * FROM assets WHERE id = ?").get(id) as Row | undefined;
+      if (!row)
+        return reply.code(404).send({
+          error: { code: "ASSET_NOT_FOUND", message: "Asset not found" },
+        });
+      if (mediaType(row) === "video" && !row.remote_preview_url && !row.remote_image_url)
+        return reply.code(422).send({
+          error: { code: "IMAGE_SOURCE_UNAVAILABLE", message: "This asset has no image source" },
+        });
+
+      const referer = typeof row.canonical_asset_url === "string" ? row.canonical_asset_url : null;
+      const sourceUrls = [row.remote_preview_url, row.remote_image_url, row.remote_media_url]
+        .filter((value): value is string => isPinterestCdnUrl(value));
+      const candidates = Array.from(new Set(sourceUrls.flatMap((url) => pinterestImageCandidates(url))));
+      let upstream: Response | null = null;
+      for (const candidate of candidates) {
+        try {
+          const response = await fetchRemoteImage(candidate, referer);
+          const contentType = response.headers.get("content-type");
+          if (response.ok && response.body && (!contentType || /^image\//i.test(contentType))) {
+            upstream = response;
+            break;
+          }
+          await response.body?.cancel();
+        } catch {
+          // Try the next Pinterest CDN variant when a source is unavailable.
+        }
+      }
+      if (!upstream || !upstream.body)
+        return reply.code(404).send({
+          error: { code: "IMAGE_SOURCE_UNAVAILABLE", message: "The Pinterest image could not be loaded" },
+        });
+
+      const contentType = upstream.headers.get("content-type") ?? row.mime_type ?? "image/jpeg";
+      const contentLength = upstream.headers.get("content-length");
+      const response = reply.code(upstream.status).type(contentType).header("Cache-Control", "no-store");
+      if (contentLength) response.header("Content-Length", contentLength);
       return response.send(Readable.fromWeb(upstream.body as any));
     },
   );
