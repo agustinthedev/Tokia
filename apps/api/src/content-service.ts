@@ -4,7 +4,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { pinterestImageCandidates } from '@tokia/shared';
-import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameTrim, frameRoles, isMotionMedia, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
+import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameDuration, effectiveFrameTrim, frameRoles, isMotionMedia, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
 import { contentDirectory, createThumbnail, downloadSource, MediaProcessingError, normalizeImage, renderSlideshow, sha256File, type SlideshowScene } from './content-media.js';
 import { convertHeicToJpeg, isHeicImageUrl } from './image-conversion.js';
 import { generateNarrative, validateNarrative, type Narrative } from './narrative.js';
@@ -16,6 +16,10 @@ type Settings = { contentStorageDirectory: string; ffmpegPath: string; modelProv
 function now(): string { return new Date().toISOString(); }
 function id(): string { return crypto.randomUUID(); }
 function parseJson<T>(value: unknown, fallback: T): T { if (typeof value !== 'string') return fallback; try { return JSON.parse(value) as T; } catch { return fallback; } }
+function normalizedSourceMediaType(value: unknown, hasSource: boolean): string | null {
+  if (!hasSource) return null;
+  return isMotionMedia(value) ? String(value) : 'image';
+}
 
 function projectRow(db: Database.Database, projectId: string): Row | undefined { return db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Row | undefined; }
 function contentRow(db: Database.Database, contentId: string): Row | undefined { return db.prepare('SELECT c.*, p.name AS project_name, p.niche AS project_niche, p.description AS project_description, p.default_language AS project_language FROM content_items c JOIN projects p ON p.id = c.project_id WHERE c.id = ?').get(contentId) as Row | undefined; }
@@ -56,13 +60,18 @@ export function contentSnapshot(db: Database.Database, contentId: string): Row |
     LEFT JOIN collection_assets ca ON ca.asset_id = a.id LEFT JOIN collections c ON c.id = ca.collection_id
     WHERE f.content_id = ? GROUP BY f.id ORDER BY f.position`).all(contentId) as Row[]).map((frame) => {
       const settings = parseJson<Row>(frame.settings_json, {});
-      const trim = row.type === 'video_slideshow' ? effectiveFrameTrim(settings, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
-      const durationSeconds = trim?.durationSeconds ?? null;
+      const sourceMediaType = normalizedSourceMediaType(frame.source_media_type, Boolean(frame.source_media_id));
+      const motionSource = isMotionMedia(sourceMediaType);
+      const trim = row.type === 'video_slideshow' && motionSource ? effectiveFrameTrim(settings, configuration, sourceMediaType, frame.source_duration_seconds) : null;
+      const configuredDuration = settings.durationCustomized ? settings.durationSeconds : configuration.video.secondsPerImage;
+      const durationSeconds = row.type === 'video_slideshow'
+        ? trim?.durationSeconds ?? effectiveFrameDuration(configuredDuration, configuration, sourceMediaType, frame.source_duration_seconds)
+        : null;
       return {
         id: frame.id, position: frame.position, role: frame.role, headline: frame.headline, body: frame.body,
-        durationSeconds, startSeconds: trim && isMotionMedia(frame.source_media_type) ? trim.startSeconds : null, endSeconds: trim && isMotionMedia(frame.source_media_type) ? trim.endSeconds : null,
+        durationSeconds, startSeconds: trim ? trim.startSeconds : null, endSeconds: trim ? trim.endSeconds : null,
         textLocked: Boolean(frame.text_locked), imageLocked: Boolean(frame.image_locked), settings,
-        sourceMedia: frame.source_media_id ? { id: frame.source_media_id, externalId: frame.external_asset_id, imageUrl: frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url, previewUrl: frame.remote_preview_url, mediaUrl: frame.remote_media_url ?? frame.remote_preview_url ?? frame.remote_image_url, width: frame.source_width, height: frame.source_height, durationSeconds: frame.source_duration_seconds, mediaType: frame.source_media_type, title: frame.source_title, altText: frame.source_alt_text, collectionName: frame.source_collection_name } : null
+        sourceMedia: frame.source_media_id ? { id: frame.source_media_id, externalId: frame.external_asset_id, imageUrl: frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url, previewUrl: frame.remote_preview_url, mediaUrl: frame.remote_media_url ?? frame.remote_preview_url ?? frame.remote_image_url, width: frame.source_width, height: frame.source_height, durationSeconds: frame.source_duration_seconds, mediaType: sourceMediaType, title: frame.source_title, altText: frame.source_alt_text, collectionName: frame.source_collection_name } : null
       };
     });
   const assets = (db.prepare('SELECT id, frame_id, asset_type, variant, status, mime_type, width, height, duration_ms, sha256, metadata_json, created_at FROM content_assets WHERE content_id = ? ORDER BY created_at DESC').all(contentId) as Row[]).map((asset) => ({
@@ -203,14 +212,18 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
   const scenes: SlideshowScene[] = [];
   const timestamp = now();
   for (let index = 0; index < frames.length; index += 1) {
-    const frame = frames[index]!; const motionSource = row.type === 'video_slideshow' && isMotionMedia(frame.source_media_type) && frame.remote_media_url;
-    const sourceUrl = String(motionSource ? frame.remote_media_url : frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url ?? '');
+    const frame = frames[index]!; const sourceMediaType = normalizedSourceMediaType(frame.source_media_type, Boolean(frame.source_media_id)); const motionUrl = row.type === 'video_slideshow' && isMotionMedia(sourceMediaType) && frame.remote_media_url;
+    const sourceUrl = String(motionUrl ? frame.remote_media_url : frame.remote_image_url ?? frame.remote_preview_url ?? frame.remote_media_url ?? '');
     if (!sourceUrl) throw new MediaProcessingError('SOURCE_MEDIA_MISSING', `Source media is missing for frame ${index + 1}.`);
     const sourceKey = String(frame.source_media_id).replace(/[^a-zA-Z0-9_-]/g, '');
     const frameSettings = parseJson<Row>(frame.settings_json, {});
-    const trim = row.type === 'video_slideshow' ? effectiveFrameTrim(frameSettings, configuration, frame.source_media_type, frame.source_duration_seconds) : null;
-    const durationSeconds = trim?.durationSeconds ?? null;
-    const sourcePath = motionSource ? path.join(directory, `motion-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.media`) : null;
+    const motionFrame = isMotionMedia(sourceMediaType);
+    const trim = row.type === 'video_slideshow' && motionFrame ? effectiveFrameTrim(frameSettings, configuration, sourceMediaType, frame.source_duration_seconds) : null;
+    const configuredDuration = frameSettings.durationCustomized ? frameSettings.durationSeconds : configuration.video.secondsPerImage;
+    const durationSeconds = row.type === 'video_slideshow'
+      ? trim?.durationSeconds ?? effectiveFrameDuration(configuredDuration, configuration, sourceMediaType, frame.source_duration_seconds)
+      : null;
+    const sourcePath = motionUrl ? path.join(directory, `motion-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.media`) : null;
     if (sourcePath && !fs.existsSync(sourcePath)) await downloadSource(sourceUrl, sourcePath);
     const normalizedPath = path.join(directory, `source-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.png`);
     if (!fs.existsSync(normalizedPath)) {

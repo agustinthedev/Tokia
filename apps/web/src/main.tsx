@@ -148,6 +148,13 @@ interface ContentFrame {
   settings?: AnyRecord;
   sourceMedia?: Asset | null;
 }
+function isImageSourceFrame(frame: ContentFrame): boolean {
+  const mediaType = frame.sourceMedia?.mediaType;
+  return Boolean(frame.sourceMedia) && mediaType !== "video" && mediaType !== "animated";
+}
+function isUnlockedImageSourceFrame(frame: ContentFrame): boolean {
+  return isImageSourceFrame(frame) && !frame.imageLocked;
+}
 interface ContentDetail extends ContentSummary {
   wizardStep?: number;
   configuration: AnyRecord;
@@ -3000,6 +3007,11 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         delete next[frame.id];
         return next;
       });
+      setDurationDrafts((current) => {
+        const next = { ...current };
+        delete next[frame.id];
+        return next;
+      });
       setSourcePickerFrameId(null);
       setSourceSearch("");
       closeSourcePreview();
@@ -3154,7 +3166,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const applyUnlockedImageDuration = async () => {
     if (!content || type !== "video_slideshow") return;
     const value = Number(bulkDurationDraft);
-    const targetCount = content.frames.filter((frame) => frame.sourceMedia?.mediaType === "image" && !frame.imageLocked).length;
+    const targetCount = content.frames.filter(isUnlockedImageSourceFrame).length;
     if (!Number.isFinite(value)) {
       setError("Enter a valid duration in seconds.");
       return;
@@ -3577,7 +3589,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               </label>
               <Button
                 onClick={() => void applyUnlockedImageDuration()}
-                disabled={!content || saving || !content.frames.some((frame) => frame.sourceMedia?.mediaType === "image" && !frame.imageLocked)}
+                disabled={!content || saving || !content.frames.some(isUnlockedImageSourceFrame)}
               >
                 Apply to unlocked images
               </Button>

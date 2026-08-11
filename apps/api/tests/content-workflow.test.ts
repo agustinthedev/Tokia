@@ -135,12 +135,20 @@ describe('project and content workflow', () => {
         width: 736,
         height: 1104,
         durationSeconds: 4.2
+      }, {
+        externalId: 'image-source',
+        pinUrl: 'https://www.pinterest.com/pin/image-source/',
+        imageUrl: 'https://i.pinimg.com/736x/dd/ee/ff/image-source.jpg',
+        previewUrl: 'https://i.pinimg.com/236x/dd/ee/ff/image-source.jpg',
+        width: 736,
+        height: 1104
       }]
     } });
     const collectionId = imported.json().collection.id as string;
     const createdProject = await app.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: 'Video sources', niche: 'Travel', collectionIds: [collectionId] } });
     const projectId = createdProject.json().id as string;
     const videoAsset = (await app.inject({ method: 'GET', url: `/api/collections/${collectionId}/assets?mediaType=video` })).json().items[0];
+    const imageAsset = (await app.inject({ method: 'GET', url: `/api/collections/${collectionId}/assets?mediaType=image` })).json().items[0];
     const durationMetadata = await app.inject({ method: 'PATCH', url: `/api/assets/${videoAsset.id}`, headers, payload: { durationSeconds: 13 } });
     expect(durationMetadata.statusCode).toBe(200);
     expect(durationMetadata.json().durationSeconds).toBe(13);
@@ -178,6 +186,19 @@ describe('project and content workflow', () => {
     const invalidDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { durationSeconds: 13.1 } });
     expect(invalidDuration.statusCode).toBe(400);
     expect(invalidDuration.json().error.code).toBe('INVALID_FRAME_DURATION');
+    const replacedWithImage = await app.inject({ method: 'PUT', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}/image`, headers, payload: { mediaId: imageAsset.id } });
+    expect(replacedWithImage.statusCode).toBe(200);
+    expect(replacedWithImage.json().frames[0]).toMatchObject({ durationSeconds: 1.5, startSeconds: null, endSeconds: null, sourceMedia: { mediaType: 'image' } });
+    expect(replacedWithImage.json().frames[0].settings).toMatchObject({ durationSeconds: 1.5, durationCustomized: false });
+    expect(replacedWithImage.json().frames[0].settings.startSeconds).toBeUndefined();
+    expect(replacedWithImage.json().frames[0].settings.endSeconds).toBeUndefined();
+    expect(replacedWithImage.json().configuration.video.secondsPerImage).toBe(1.5);
+    const unlockedImage = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/${videoContentSelection.json().frames[0].id}`, headers, payload: { imageLocked: false } });
+    expect(unlockedImage.statusCode).toBe(200);
+    expect(unlockedImage.json().frames[0]).toMatchObject({ imageLocked: false, sourceMedia: { mediaType: 'image' } });
+    const bulkImageDuration = await app.inject({ method: 'PATCH', url: `/api/content/${videoContentId}/frames/duration`, headers, payload: { durationSeconds: 0.8 } });
+    expect(bulkImageDuration.statusCode).toBe(200);
+    expect(bulkImageDuration.json().frames[0]).toMatchObject({ durationSeconds: 0.8, imageLocked: false, sourceMedia: { mediaType: 'image' } });
   });
 });
 
