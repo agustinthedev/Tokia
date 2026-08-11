@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -108,6 +109,46 @@ function bodyOf(request: FastifyRequest): Record<string, unknown> {
 }
 function now(): string {
   return new Date().toISOString();
+}
+function remoteVideoRequestHeaders(request: FastifyRequest, referer: string | null): Headers {
+  const headers = new Headers({
+    Accept: "video/mp4,video/webm,video/*;q=0.9,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 Tokia local media proxy",
+  });
+  const range = request.headers.range;
+  if (typeof range === "string" && range) headers.set("Range", range);
+  headers.set("Referer", referer ?? "https://www.pinterest.com/");
+  return headers;
+}
+function isPinterestMediaUrl(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "pinimg.com" || hostname.endsWith(".pinimg.com");
+  } catch {
+    return false;
+  }
+}
+async function fetchRemoteVideo(url: string, request: FastifyRequest, referer: string | null): Promise<Response> {
+  return fetch(url, { headers: remoteVideoRequestHeaders(request, referer) });
+}
+function persistResolvedVideo(db: Database.Database, assetId: string, resolved: { mediaUrl: string; posterUrl: string | null; mimeType: string | null; durationSeconds: number | null }): void {
+  db.prepare(
+    `UPDATE assets SET
+      remote_media_url = ?,
+      remote_preview_url = COALESCE(?, remote_preview_url),
+      mime_type = COALESCE(?, mime_type),
+      duration_seconds = COALESCE(?, duration_seconds),
+      updated_at = ?
+      WHERE id = ?`,
+  ).run(
+    resolved.mediaUrl,
+    resolved.posterUrl ? promoteToLargestPinterestImage(resolved.posterUrl) : null,
+    resolved.mimeType,
+    resolved.durationSeconds,
+    now(),
+    assetId,
+  );
 }
 function parseJson<T>(value: unknown, fallback: T): T {
   if (typeof value !== "string") return fallback;
@@ -1353,27 +1394,65 @@ export async function buildApp(
               "Pinterest did not expose a playable video URL for this Pin",
           },
         });
-      db.prepare(
-        `UPDATE assets SET
-      remote_media_url = ?,
-      remote_preview_url = COALESCE(?, remote_preview_url),
-      mime_type = COALESCE(?, mime_type),
-      duration_seconds = COALESCE(?, duration_seconds),
-      updated_at = ?
-      WHERE id = ?`,
-      ).run(
-        resolved.mediaUrl,
-        resolved.posterUrl
-          ? promoteToLargestPinterestImage(resolved.posterUrl)
-          : null,
-        resolved.mimeType,
-        resolved.durationSeconds,
-        now(),
-        id,
-      );
+      persistResolvedVideo(db, id, {
+        mediaUrl: resolved.mediaUrl,
+        posterUrl: resolved.posterUrl,
+        mimeType: resolved.mimeType,
+        durationSeconds: resolved.durationSeconds,
+      });
       return toAsset(
         db.prepare("SELECT * FROM assets WHERE id = ?").get(id) as Row,
       );
+    },
+  );
+
+  app.get(
+    "/api/assets/:id/media",
+    { schema: { tags: ["assets"], summary: "Stream a Pinterest video through the local API" } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      let row = db.prepare("SELECT * FROM assets WHERE id = ?").get(id) as Row | undefined;
+      if (!row)
+        return reply.code(404).send({
+          error: { code: "ASSET_NOT_FOUND", message: "Asset not found" },
+        });
+      if (mediaType(row) !== "video")
+        return reply.code(422).send({
+          error: { code: "ASSET_IS_NOT_VIDEO", message: "Only video assets can be streamed" },
+        });
+
+      const referer = typeof row.canonical_asset_url === "string" ? row.canonical_asset_url : null;
+      let mediaUrl = isPlayableVideoUrl(row.remote_media_url) && isPinterestMediaUrl(row.remote_media_url) ? row.remote_media_url : null;
+      let upstream = mediaUrl ? await fetchRemoteVideo(mediaUrl, request, referer) : null;
+      const shouldRefresh = !upstream || [401, 403, 404].includes(upstream.status);
+      if (shouldRefresh && typeof row.canonical_asset_url === "string" && row.canonical_asset_url) {
+        const resolved = await resolvePinterestVideo(row.canonical_asset_url);
+        if (resolved.mediaUrl && isPlayableVideoUrl(resolved.mediaUrl) && isPinterestMediaUrl(resolved.mediaUrl)) {
+          persistResolvedVideo(db, id, {
+            mediaUrl: resolved.mediaUrl,
+            posterUrl: resolved.posterUrl,
+            mimeType: resolved.mimeType,
+            durationSeconds: resolved.durationSeconds,
+          });
+          mediaUrl = resolved.mediaUrl;
+          row = db.prepare("SELECT * FROM assets WHERE id = ?").get(id) as Row;
+          upstream = await fetchRemoteVideo(mediaUrl, request, referer);
+        }
+      }
+      if (!upstream || !upstream.ok || !upstream.body)
+        return reply.code(upstream?.status && upstream.status >= 400 ? upstream.status : 404).send({
+          error: { code: "VIDEO_SOURCE_UNAVAILABLE", message: "The Pinterest video could not be streamed" },
+        });
+
+      const contentType = upstream.headers.get("content-type") ?? row.mime_type ?? "video/mp4";
+      const contentLength = upstream.headers.get("content-length");
+      const contentRange = upstream.headers.get("content-range");
+      const acceptRanges = upstream.headers.get("accept-ranges");
+      const response = reply.code(upstream.status).type(contentType).header("Cache-Control", "no-store");
+      if (contentLength) response.header("Content-Length", contentLength);
+      if (contentRange) response.header("Content-Range", contentRange);
+      if (acceptRanges) response.header("Accept-Ranges", acceptRanges);
+      return response.send(Readable.fromWeb(upstream.body as any));
     },
   );
 
