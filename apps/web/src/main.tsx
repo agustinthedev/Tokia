@@ -456,7 +456,7 @@ function MediaPreview({ asset, detail = false, onImageLoad }: { asset: Asset; de
   useEffect(() => setPlaybackFailed(false), [asset.id, asset.mediaUrl]);
   const imageSources = Array.from(new Set((asset.mediaType === "video" ? [asset.remotePreviewUrl, asset.previewUrl, asset.thumbnailUrl, asset.remoteImageUrl, asset.imageUrl] : [asset.remoteImageUrl, asset.mediaUrl, asset.previewUrl, asset.remotePreviewUrl, asset.thumbnailUrl, asset.imageUrl]).filter((value): value is string => Boolean(value))));
   const image = imageSources[sourceIndex];
-  const videoSource = asset.mediaType === "video" && asset.mediaUrl ? asset.mediaUrl : undefined;
+  const videoSource = asset.mediaType === "video" && asset.mediaUrl ? `${API_BASE}/api/assets/${asset.id}/media` : undefined;
   const handleImageError = (): void => setSourceIndex((current) => current + 1);
   const handleImageLoad = (event: SyntheticEvent<HTMLImageElement>): void =>
     onImageLoad?.({
