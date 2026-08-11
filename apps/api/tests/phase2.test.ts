@@ -64,6 +64,7 @@ describe('Phase 2 management API', () => {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     if (app) await app.close();
     if (db?.open) db.close();
     app = undefined;
@@ -150,6 +151,56 @@ describe('Phase 2 management API', () => {
     const resolved = await app.inject({ method: 'POST', url: `/api/assets/${assetId}/resolve-media`, headers: { 'x-local-integration-token': token } });
     expect(resolved.statusCode).toBe(200);
     expect(resolved.json()).toMatchObject({ mediaType: 'video', mediaUrl: 'https://v1.pinimg.com/videos/clip_720w.mp4', mimeType: 'video/mp4' });
-    vi.unstubAllGlobals();
+  });
+
+  it('streams a video through the API with browser range headers', async () => {
+    ({ db, app } = await setup());
+    const imported = await importBoard(app);
+    const assetId = (db!.prepare('SELECT id FROM assets WHERE external_asset_id = ?').get('video-1') as { id: string }).id;
+    const remoteUrl = 'https://v.pinimg.com/videos/video-1.mp4';
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe(remoteUrl);
+      const headers = new Headers(init?.headers);
+      expect(headers.get('range')).toBe('bytes=0-3');
+      expect(headers.get('referer')).toBe('https://www.pinterest.com/pin/video-1/');
+      return new Response(Buffer.from('test'), {
+        status: 206,
+        headers: {
+          'content-type': 'video/mp4',
+          'content-length': '4',
+          'content-range': 'bytes 0-3/12',
+          'accept-ranges': 'bytes'
+        }
+      });
+    }));
+    const streamed = await app.inject({ method: 'GET', url: `/api/assets/${assetId}/media`, headers: { range: 'bytes=0-3' } });
+    expect(streamed.statusCode).toBe(206);
+    expect(streamed.headers).toMatchObject({
+      'content-type': 'video/mp4',
+      'content-length': '4',
+      'content-range': 'bytes 0-3/12',
+      'accept-ranges': 'bytes'
+    });
+    expect(streamed.body).toBe('test');
+  });
+
+  it('refreshes an expired Pinterest video URL before streaming it', async () => {
+    ({ db, app } = await setup());
+    const imported = await importBoard(app);
+    const assetId = (db!.prepare('SELECT id FROM assets WHERE external_asset_id = ?').get('video-1') as { id: string }).id;
+    const freshUrl = 'https://v1.pinimg.com/videos/video-1-fresh.mp4';
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      calls += 1;
+      if (calls === 1) return new Response('expired', { status: 403 });
+      if (calls === 2) return new Response(`{"videoList720P":{"v720P":{"url":"${freshUrl}"}}}`, { status: 200 });
+      expect(String(input)).toBe(freshUrl);
+      return new Response(Buffer.from('fresh'), { status: 206, headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-4/5' } });
+    }));
+    const streamed = await app.inject({ method: 'GET', url: `/api/assets/${assetId}/media`, headers: { range: 'bytes=0-4' } });
+    expect(streamed.statusCode).toBe(206);
+    expect(streamed.body).toBe('fresh');
+    expect(calls).toBe(3);
+    expect(db!.prepare('SELECT remote_media_url FROM assets WHERE id = ?').get(assetId)).toMatchObject({ remote_media_url: freshUrl });
   });
 });
