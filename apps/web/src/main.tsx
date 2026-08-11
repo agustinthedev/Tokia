@@ -2600,6 +2600,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const defaultSettings = project.config ?? {};
   const [step, setStep] = useState(existingId ? 4 : 1);
   const [type, setType] = useState(String((defaultSettings.preferredContentTypes as string[] | undefined)?.[0] ?? "carousel"));
+  const [title, setTitle] = useState("");
   const [selectedCollections, setSelectedCollections] = useState<string[]>(project.collections?.map((item) => item.id) ?? []);
   const [config, setConfig] = useState<AnyRecord>({
     sourceCollectionIds: project.collections?.map((item) => item.id) ?? [],
@@ -2689,6 +2690,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
         if (!active) return;
         setContent(loaded);
         setType(loaded.type);
+        setTitle(loaded.title ?? "");
         setConfig(loaded.configuration);
         setSelectedCollections(loaded.configuration.sourceCollectionIds ?? []);
         setPreviewPolling(loaded.status === "preview_generating" || loaded.jobs.some((job) => job.jobType === "preview_render" && ["queued", "running"].includes(job.status)));
@@ -2746,6 +2748,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
   const ensureDraft = async (): Promise<ContentDetail> => {
     if (content) {
       const updated = await patchContent({
+        title,
         type,
         configuration: { ...config, sourceCollectionIds: selectedCollections },
       });
@@ -2755,6 +2758,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       method: "POST",
       body: JSON.stringify({
         type,
+        title,
         configuration: {
           ...config,
           sourceCollectionIds: selectedCollections,
@@ -2778,6 +2782,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
     setNotice("");
     try {
       if (step === 1) {
+        if (content) await patchContent({ title });
         await persistStep(2);
         return;
       }
@@ -3138,6 +3143,19 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
               <h3>Choose the finished asset format</h3>
             </div>
           </div>
+          <label className="form-field content-title-field">
+            <span>Content title</span>
+            <input
+              value={title}
+              maxLength={200}
+              onChange={(event) => {
+                setDirty(true);
+                setTitle(event.target.value);
+              }}
+              placeholder="e.g. 5 morning mobility habits"
+            />
+            <small>Used to identify this content in the project and downloads.</small>
+          </label>
           <div className="content-type-grid">
             {[
               ["single_image", "Single image", "One finished image with optional text."],
