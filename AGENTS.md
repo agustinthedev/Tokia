@@ -193,10 +193,38 @@ Do not push implementation commits directly to `master`.
 
 ## Commits
 
-Make commits frequently during implementation.
+Commit structure is part of the definition of done, not a stylistic
+preference. Before implementation, outline the intended commit sequence and
+keep each commit focused on one coherent concern. A commit should be easy to
+review, revert, cherry-pick, and describe in one sentence.
 
-Prefer small, coherent commits representing meaningful implementation
-milestones instead of one large commit at the end.
+Do not put an entire feature or bug fix into one commit when it contains
+multiple independently understandable concerns. In particular, do not combine
+the production fix, regression-test changes, unrelated frontend work,
+refactors, formatting, documentation, or configuration changes in the same
+commit merely because they are part of one pull request.
+
+For a bug fix, separate the regression coverage from the production fix when
+they can be separated. A typical sequence is:
+
+1. `test(scope): add regression coverage for the reported behavior`;
+2. `fix(scope): implement the smallest production change that fixes it`;
+3. optional follow-up commits for independent UI, refactoring, documentation,
+   or configuration work.
+
+If a test-first commit is expected to fail until the following fix commit,
+make that intent clear in the commit and pull request; do not merge the test
+and implementation solely to avoid an intermediate red commit. Every commit
+must still be understandable and should leave the repository in a safe,
+recoverable state whenever practical.
+
+The merged [PR #10](https://github.com/agustinthedev/Tokia/pull/10), titled
+`fix: restore video source duration in slideshow trim`, is an example of what
+to avoid: its single commit mixed API changes, frontend behavior, styling, and
+test changes. A similar task should instead use separate logical commits such
+as regression coverage, API/source-duration correction, and independent
+frontend interaction changes. These are logical boundaries, not a rule to
+split every changed file into its own commit.
 
 Good commit boundaries may include:
 
@@ -209,10 +237,8 @@ Good commit boundaries may include:
 * documentation.
 
 Do not create a separate commit merely because a single file changed. Commit
-according to logical units of work.
-
-Whenever practical, each commit should leave the repository in a valid and
-understandable state.
+according to logical units of work, and do not combine unrelated concerns just
+to reduce the number of commits.
 
 Use clear commit messages following this general format:
 
