@@ -1,328 +1,191 @@
 # Tokia
 
-Tokia es una aplicación local-first para importar referencias de imágenes desde Pinterest, organizarlas en proyectos y convertirlas en contenido reutilizable. Incluye la fundación de ingestión, el workspace web y un flujo local de generación de imágenes, carruseles y videos slideshow.
+Tokia is a local-first workspace for importing Pinterest references, organizing them into projects, and producing reusable visual content. The current workflows support single images, carousels, video slideshows, and AI-assisted video clipping.
 
-La generación narrativa local es determinista y está preparada para sustituirse por un proveedor de modelos más adelante. La publicación en TikTok/Instagram/Facebook, scheduling, autenticación de usuarios finales y analytics siguen fuera de alcance.
-
-## Arquitectura
+## Repository structure
 
 ```text
-Pinterest abierto y autenticado en Chrome/Brave
-        │
-        ▼
-apps/extension (Manifest V3, scanner en memoria)
-        │ JSON + X-Local-Integration-Token
-        ▼
-apps/api (Fastify + Zod)
-        │ transacción SQLite
-        ▼
-collections ── collection_assets ── assets
-        │
-        └── import_runs
+Tokia/
+├── apps/
+│   ├── api/          Fastify API, SQLite persistence, migrations, and media jobs
+│   ├── extension/    Chrome/Brave Manifest V3 Pinterest scanner
+│   └── web/          React + Vite local workspace
+├── packages/
+│   └── shared/       Shared TypeScript types, schemas, and normalization helpers
+├── docs/             Workflow and implementation notes
+├── data/             Local runtime data created by the API (gitignored)
+├── package.json      npm workspace scripts
+└── tsconfig.base.json
 ```
 
-El monorepo está organizado así:
+## Architecture
 
-- `apps/api`: API Fastify, migraciones, SQLite, ingestión y endpoints de gestión.
-- `apps/extension`: extensión MV3, popup, settings y scanner Pinterest.
-- `packages/shared`: tipos, esquemas Zod y normalización compartida.
-- `docs`: reservado para documentación adicional de futuras fases.
+```text
+Authenticated Pinterest tab
+          │
+          ▼
+Manifest V3 extension ── versioned JSON ──▶ Fastify API
+                                                │
+                            ┌───────────────────┼───────────────────┐
+                            ▼                   ▼                   ▼
+                         SQLite             Filesystem          FFmpeg/FFprobe
+                                                ▲
+                                                │
+                                      React/Vite web app
+```
 
-La extensión envía JSON al API en lugar de acceder directamente a SQLite para mantener una frontera clara entre navegador y aplicación, permitir validación/transacciones en un solo lugar y evitar exponer credenciales de base de datos. Pinterest se consulta solamente desde la pestaña autenticada del usuario; la extensión no usa la API oficial, no guarda cookies y no descarga imágenes grandes.
+The browser extension scans Pinterest pages in the authenticated browser tab and sends normalized data to the local API. It does not call the Pinterest API, store browser cookies, or access SQLite directly. The web app communicates with the API for projects, imports, content generation, settings, and job status.
 
-## Requisitos
+## Requirements
 
-- Node.js 20 o superior. Se desarrolla y verifica con Node 22.
-- Google Chrome o Brave.
-- Una sesión de Pinterest autenticada en el navegador para probar la extensión.
-- No se usa Docker.
+- Node.js 20 or newer
+- npm
+- FFmpeg and FFprobe on `PATH`, or their paths configured in the application settings
+- Chrome or Brave if you want to use the Pinterest browser extension
 
-## Instalación y configuración
+Docker and a `.env` file are not required for the normal local workflow.
 
-Desde la raíz del repositorio:
+## Quick start
+
+Install dependencies and apply the database migrations from the repository root:
 
 ```bash
 npm install
-```
-
-No es necesario crear un `.env` para una instalaciÃ³n local. Tokia genera y persiste automÃ¡ticamente sus secretos de runtime, y la configuraciÃ³n de proveedores, integraciÃ³n local, extensiÃ³n y opciones avanzadas se realiza desde la interfaz.
-
-Los valores avanzados tienen defaults seguros y se guardan en `data/tokia-settings.json`. Los cambios de servidor, almacenamiento y proceso pueden requerir reiniciar el API.
-
-Opciones avanzadas disponibles desde `Settings > Advanced`:
-
-| Opción | Default | Uso |
-| --- | --- | --- |
-| `HOST` | `127.0.0.1` | Interfaz local del API. |
-| `PORT` | `3000` | Puerto del API. |
-| `DATABASE_PATH` | `./data/tokia.sqlite` | Ruta relativa al workspace del API. |
-| `LOCAL_INTEGRATION_TOKEN` | Generado y persistido en SQLite | Override opcional del token local. En el uso normal se administra desde Settings. |
-| `MAX_PINS_PER_IMPORT` | `2000` | Máximo de Pins por importación. |
-| `MAX_REQUEST_BYTES` | `10485760` | Máximo de request, 10 MiB. |
-| `CORS_ALLOWED_ORIGINS` | Orígenes locales de Vite y Tokia | Override opcional de los orígenes exactos separados por comas. El origen de la extensión se persiste desde Settings. |
-| `LOG_LEVEL` | `info` | Nivel de logs estructurados. |
-| `CONTENT_STORAGE_DIRECTORY` | `./data/content` | Directorio para derivados de contenido, previews y archivos finales. |
-| `FFPROBE_PATH` | `ffprobe` | Ejecutable FFprobe usado para inspeccionar fuentes de clipping. |
-| `MAX_UPLOAD_BYTES` | `262144000` | Tamaño máximo de una fuente de video, 250 MiB. |
-| `APP_SECRETS_ENCRYPTION_KEY` | Generada y persistida en `data/.tokia-secrets.json` | Override opcional para despliegues que administren sus propios secretos. |
-| `FFMPEG_PATH` | `ffmpeg` | Ejecutable FFmpeg usado para normalización, thumbnails y videos slideshow. |
-| `MODEL_PROVIDER` | `local` | Proveedor narrativo actual; `local` usa generación determinista sin red. |
-| `MODEL_NAME` | `structured-local-v1` | Identificador persistido junto a la configuración de generación. |
-
-El token no se escribe en logs. La extensión lo recibe al usar `Connect extension` y lo almacena en `chrome.storage.local`. No compartas el archivo `data/.tokia-secrets.json` ni la base SQLite con terceros si contienen credenciales configuradas.
-
-## Base de datos y migraciones
-
-El API usa SQLite con:
-
-- WAL para permitir lecturas concurrentes durante imports locales.
-- Foreign keys habilitadas.
-- `busy_timeout` de 5 segundos.
-- Migraciones versionadas en `apps/api/migrations`.
-
-Cuando se ejecutan los scripts de workspace desde la raíz, la base por defecto queda en `apps/api/data/tokia.sqlite`. La carpeta y sus archivos WAL están ignorados por Git.
-
-```bash
 npm run migrate
 ```
 
-Para resetear la base local, detener el API y eliminar únicamente estos archivos:
-
-```powershell
-Remove-Item .\apps\api\data\tokia.sqlite, .\apps\api\data\tokia.sqlite-shm, .\apps\api\data\tokia.sqlite-wal -ErrorAction SilentlyContinue
-npm run migrate
-```
-
-## Ejecutar el API
+Start the API in one terminal:
 
 ```bash
 npm run dev
 ```
 
-El API queda en `http://127.0.0.1:3000` y la documentación Swagger UI en `http://127.0.0.1:3000/docs`.
-
-Comprobación rápida:
+Start the web app in a second terminal:
 
 ```bash
-curl http://127.0.0.1:3000/api/health
-```
-
-El API inicia sin Docker. `npm run start` ejecuta el build compilado; `npm run dev` usa `tsx` con reload.
-
-## API
-
-Todos los endpoints de lectura son públicos en esta fase local. El import y los cambios de estado requieren `X-Local-Integration-Token`.
-
-| Método | Endpoint | Descripción |
-| --- | --- | --- |
-| `GET` | `/api/health` | Salud del servicio y estado SQLite. |
-| `POST` | `/api/imports/pinterest-board` | Importa un payload versionado. |
-| `GET` | `/api/collections` | Lista paginada con búsqueda, provider, status y sort. |
-| `GET` | `/api/collections/:id` | Detalle y cantidad de assets. |
-| `GET` | `/api/collections/:id/assets` | Assets paginados con status, dimensiones, orientación, búsqueda y sort. |
-| `GET` | `/api/import-runs` | Lista de ejecuciones con filtros. |
-| `GET` | `/api/import-runs/:id` | Diagnóstico de una ejecución. |
-| `PATCH` | `/api/assets/:id` | Cambia `status` de un asset sin borrarlo. |
-| `PATCH` | `/api/collections/:id` | Cambia `status` de una colección sin borrarla. |
-
-Las opciones de sort de colecciones son `name`, `createdAt`, `updatedAt`, `lastImportedAt`. Assets acepta `firstSeen`, `lastSeen`, `dimensions`. La orientación acepta `portrait`, `landscape` y `square`.
-
-### Payload de importación
-
-El schema actual es la versión `1`. El board requiere nombre y URL Pinterest normalizable. Cada Pin requiere `imageUrl` y al menos `externalId` o `pinUrl`; la URL Pin puede permitir extraer el ID. Los Pins individuales se validan con `safeParse`, por lo que un registro malformado produce warning y no descarta los válidos.
-
-```json
-{
-  "schemaVersion": 1,
-  "source": "pinterest-browser-extension",
-  "exportedAt": "2026-08-05T21:00:00.000Z",
-  "board": {
-    "externalId": "optional-board-id",
-    "name": "Luxury Lifestyle",
-    "url": "https://www.pinterest.com/example/luxury-lifestyle/",
-    "description": null
-  },
-  "pins": [
-    {
-      "externalId": "123456789012345678",
-      "pinUrl": "https://www.pinterest.com/pin/123456789012345678/",
-      "imageUrl": "https://i.pinimg.com/originals/ab/cd/ef/image.jpg",
-      "previewUrl": "https://i.pinimg.com/originals/ab/cd/ef/image.jpg",
-      "imageVariants": [{ "url": "https://i.pinimg.com/originals/ab/cd/ef/image.jpg" }],
-      "title": "Luxury yacht",
-      "description": null,
-      "altText": "White yacht in Monaco",
-      "sourceLink": null,
-      "width": 1200,
-      "height": 1800
-    }
-  ]
-}
-```
-
-Respuesta resumida:
-
-```json
-{
-  "success": true,
-  "collection": { "id": "collection-id", "name": "Luxury Lifestyle", "created": true },
-  "importRunId": "import-run-id",
-  "summary": {
-    "received": 1,
-    "valid": 1,
-    "invalid": 0,
-    "assetsCreated": 1,
-    "assetsUpdated": 0,
-    "membershipsCreated": 1,
-    "duplicatesSkipped": 0
-  },
-  "warnings": []
-}
-```
-
-Un schema version distinto de `1` devuelve `400` con `UNSUPPORTED_SCHEMA_VERSION`. El límite de Pins devuelve `413`; el límite de request de 10 MiB evita payloads accidentales demasiado grandes.
-
-## Modelo y deduplicación
-
-Se eligió un asset global normalizado con tabla de unión porque el mismo Pin puede pertenecer a varios boards:
-
-- `collections`: provider, identidad de board, nombre, estado y timestamps de import.
-- `assets`: identidad de Pin, URLs remotas, metadata, dimensiones y estado.
-- `collection_assets`: membresía y `last_seen_at` por colección.
-- `import_runs`: estado, contadores, timestamps y error agregado.
-
-La identidad se resuelve por capas:
-
-1. `provider + external_asset_id` — normalmente el Pin ID.
-2. `provider + canonical_asset_url` — URL Pinterest normalizada, sin query/locale innecesarios.
-3. `provider + normalized_image_key` — solo cuando no hay ID ni URL de Pin confiable; elimina el segmento de tamaño de URLs `i.pinimg.com`.
-
-No hay índice único sobre `normalized_image_key`: dos Pins distintos que apunten al mismo path de imagen siguen siendo assets distintos si tienen IDs/URLs de Pin distintos. Los reimports actualizan `last_seen_at`, agregan membresías faltantes y no reemplazan metadata buena con null o texto vacío. La mejor variante conocida se conserva como `remote_image_url` y una preview separada; nunca se almacenan bytes ni rutas locales.
-
-La identidad de colección prioriza `provider + external_id` y luego `provider + canonical_source_url`. Por eso renombrar un board con ID estable actualiza la colección; si Pinterest no expone un ID y cambia la URL canónica, se considera una colección distinta para evitar una unión especulativa.
-
-## Extensión Chrome/Brave
-
-Construir la carpeta cargable:
-
-```bash
-npm run build:extension
-```
-
-El resultado queda en `apps/extension/dist`.
-
-### Cargar en Chrome
-
-1. Abrir `chrome://extensions`.
-2. Activar `Developer mode`.
-3. Elegir `Load unpacked`.
-4. Seleccionar `apps/extension/dist`.
-5. En Tokia, abrir `Settings > Connection > Extension connection` y pulsar `Connect extension`.
-6. Si la extensión ya estaba cargada antes de esta versión, pulsar `Reload` en `chrome://extensions` y volver a abrir Tokia.
-7. El origen CORS queda persistido en SQLite y no hace falta editar archivos de configuración. También queda disponible una opción manual avanzada en Settings.
-
-### Cargar en Brave
-
-1. Abrir `brave://extensions`.
-2. Activar `Developer mode`.
-3. Elegir `Load unpacked`.
-4. Seleccionar la misma carpeta `apps/extension/dist`.
-5. En Tokia, abrir `Settings > Connection > Extension connection` y pulsar `Connect extension`.
-
-En el popup `Open settings` permite configurar:
-
-- Backend URL, por defecto `http://localhost:3000`.
-- Token local.
-- Máximo de Pins, duración máxima, rondas sin novedades, espera entre rondas y proporción de scroll.
-
-El ID de la extensión solamente configura el origen permitido por CORS. El `Local integration token` es un valor independiente y debe coincidir entre el API y la opción propia de la extensión; nunca se muestra completo en la aplicación web.
-
-El popup muestra detección de página, nombre/URL/ID de board, estado de conexión, progreso, Pins únicos, resultado y errores. Las acciones son `Scan visible Pins`, `Scan entire board`, `Stop scan`, `Send to application`, `Copy JSON`, `Download JSON`, `Test connection` y `Open settings`.
-
-El scanner:
-
-- Usa URL, enlaces `/pin/`, imágenes `i.pinimg.com`, metadata, headings y atributos/JSON embebido como señales combinadas.
-- Extrae IDs, URL canónica, `srcset`, título, descripción, alt, source link, width y height sin navegar Pin por Pin.
-- Mantiene un `Map` en memoria durante el infinite scroll, incluso si Pinterest virtualiza y quita nodos viejos del DOM.
-- Hace scroll progresivo, espera entre rondas, limita Pins/duración, detiene tras varias rondas sin novedades y admite cancelación.
-- No continúa el scan cuando se cierra el popup o se descarga/navega la página relevante; el port de control se desconecta y cancela el scanner.
-- Reintenta únicamente fallos transitorios del envío al API, con tres intentos máximos.
-
-### Verificación manual end-to-end
-
-1. Levantar el API y abrir `/api/health`; no se requiere configurar `.env` para el uso local.
-2. Abrir Chrome o Brave con sesión Pinterest autenticada.
-3. Abrir un board, esperar a que estén visibles algunos Pins y abrir el popup de Tokia.
-4. Confirmar que el popup detecta el board y ejecutar `Scan visible Pins`.
-5. Confirmar el número de Pins y usar `Send to application`.
-6. Consultar `/api/collections`, `/api/collections/:id/assets` y `/api/import-runs`.
-7. Repetir el envío: no deben crecer las filas de colección, asset ni membresía.
-8. Ejecutar `Scan entire board`, verificar que el contador progresa, cancelar manualmente y comprobar que el payload conserva los Pins ya observados.
-9. Agregar Pins al board, repetir la importación y confirmar que solo se agregan los nuevos.
-
-La extracción depende de la estructura dinámica de Pinterest; si Pinterest cambia el DOM, los selectores y señales de `apps/extension/src/scanner.ts` son el punto de ajuste. No se debe tomar un fixture como evidencia de que el sitio vivo sigue igual.
-
-En la validación de esta fase se pudo abrir un board público real desde el navegador integrado y observar enlaces `/pin/`, alt text, URLs `i.pinimg.com`, variantes `srcset` con descriptores `1x/2x/3x/4x` y variantes `originals`. Esa observación se usó para ajustar el scanner. El entorno no expuso una sesión Chrome/Brave controlable ni permitió cargar la carpeta unpacked dentro del navegador integrado, por lo que la instalación de la extensión y el envío desde una sesión Pinterest autenticada quedan como verificación manual siguiendo los pasos anteriores.
-
-## Tests y builds
-
-```bash
-npm test
-npm run typecheck
-npm run build
-npm run build:extension
-```
-
-La suite cubre normalización de URLs, IDs, claves de imágenes, primera importación, reimportación, rename con ID, import parcial, rollback, límite de payload, cross-collection, no colapso de Pins con la misma imagen, filtros de lectura, estados soft-disable y scanner DOM con `srcset`, deduplicación y cancelación.
-
-## AI-assisted video clipping
-
-The content wizard includes **Clipping** for uploading a long-form video, transcribing it, detecting topics and subtopics, selecting clips, configuring subtitles/branding/output format, and rendering/exporting the results. Provider setup, preflight, persistence, recovery, and known limitations are documented in `docs/video-clipping.md`.
-
-## Alcance futuro
-
-## Phase 2: local media workspace
-
-Phase 2 adds `apps/web`, a React + Vite application connected to the Fastify API. It keeps the local-first boundary intact: the browser talks to the API, and only the API opens SQLite. The interface is a dark, responsive media workspace with a collapsible navigation shell, dashboard, collection galleries, global asset browsing, project management, import diagnostics, global search, and local settings.
-
-Collections and projects are intentionally different. A collection is an imported or reusable source board with global asset memberships and import history. A project references one or more collections through `project_collections`; it never copies collection assets. This leaves room for future weighting, media-type rules, usage history, randomized selection, and manual replacement.
-
-### Phase 2 development
-
-Run the API and web app in separate terminals:
-
-```bash
-npm run dev
 npm run dev:web
 ```
 
-The API runs at `http://127.0.0.1:3000`; the Vite app runs at `http://127.0.0.1:5173`. The web client bootstraps its local integration token from the API, so `VITE_INTEGRATION_TOKEN` is no longer required.
+The default local endpoints are:
 
-Build everything with:
+- Web app: `http://127.0.0.1:5173`
+- API: `http://127.0.0.1:3000`
+- API health check: `http://127.0.0.1:3000/api/health`
+- Swagger UI: `http://127.0.0.1:3000/docs`
+
+## Pinterest browser extension
+
+Build the extension with:
 
 ```bash
-npm run build
-npm run typecheck
-npm test
+npm run build:extension
+```
+
+Then load `apps/extension/dist` as an unpacked extension:
+
+1. Open `chrome://extensions` or `brave://extensions`.
+2. Enable Developer mode.
+3. Select **Load unpacked** and choose the `apps/extension/dist` directory.
+4. In Tokia, open **Settings → Connection** and connect the extension.
+5. Open a Pinterest board in the same browser and start a scan from the extension.
+
+The extension uses the local integration token managed by Tokia. Mutation requests to the API require that token in the `X-Local-Integration-Token` header.
+
+## Content workflows
+
+Projects are the main organizing unit. A project stores its niche, language, notes, visual defaults, and references to source collections without copying the source media.
+
+From a project, **Create content** provides the following content types:
+
+- **Single image**: one generated visual asset.
+- **Carousel**: independently generated slides exported as a downloadable ZIP with metadata and caption text.
+- **Video slideshow**: an MP4 composed from timed image and video scenes, with a cover and optional call to action.
+- **Video clipping**: candidate clips generated from an uploaded long-form video, with subtitles, branding, and export settings.
+
+The content wizard collects the content title at the beginning, then walks through source selection, structure, content, visuals, text, and preview. For video slideshows, image duration can be set globally before content selection, applied in bulk only to unlocked image scenes, and adjusted per scene afterward. Video scenes keep their own timing.
+
+Preview generation is local and must complete before the final confirmation step. Generated media is stored under the configured content storage directory; originals are left untouched.
+
+## Runtime configuration and local data
+
+Runtime settings are managed in **Settings → Advanced** and persisted to:
+
+```text
+data/tokia-settings.json
+```
+
+The default settings are:
+
+| Setting | Default |
+| --- | --- |
+| `host` | `127.0.0.1` |
+| `port` | `3000` |
+| `databasePath` | `./data/tokia.sqlite` |
+| `contentStorageDirectory` | `./data/content` |
+| `ffmpegPath` | `ffmpeg` |
+| `ffprobePath` | `ffprobe` |
+| `maxUploadBytes` | `250 MB` |
+| `modelProvider` | `local` |
+| `modelName` | `local-structured-v1` |
+| `maxPinsPerImport` | `2000` |
+| `maxRequestBytes` | `10 MB` |
+| `logLevel` | `info` |
+
+The API creates these local files as needed:
+
+- `data/tokia.sqlite`: application database.
+- `data/content/`: source media and derived assets.
+- `data/.tokia-secrets.json`: encryption material for stored provider credentials.
+
+The entire `data/` directory is ignored by Git. Keep its contents private and back it up before moving or resetting a local installation. Settings that affect the running process, such as the port or media tool paths, may require an API restart after saving.
+
+## AI providers and clipping
+
+AI provider settings are configured from the application. Provider credentials are handled by the backend and stored encrypted locally. The deterministic local narrative provider is available by default for structured content generation.
+
+The clipping workflow supports transcription, topic analysis, candidate selection, subtitle configuration, branding, and rendering. Local Whisper is not bundled; configure an available runtime if you want to use it. See [`docs/video-clipping.md`](docs/video-clipping.md) for the workflow and current limitations.
+
+## Database migrations
+
+SQL migrations live in `apps/api/migrations`. Apply pending migrations with:
+
+```bash
 npm run migrate
 ```
 
-Phase 2 migration `apps/api/migrations/002_phase2.sql` adds separate local collection metadata, cover references, lifecycle timestamps, media type/video metadata, projects, and the project-to-collection relationship. It is additive and safe to run against the Phase 1 SQLite database.
+The migration runner records applied migrations in SQLite and is safe to run after every update.
 
-### Phase 2 API surface
+## Development commands
 
-The UI uses `GET /api/dashboard`, `/api/settings`, `/api/search`, collection and asset list/detail routes, project CRUD and project-collection association routes, and import-run list/detail routes. Mutation routes retain the local integration token boundary. Image cards use lazy remote previews. Video cards use poster-first rendering and an explicit play affordance; the detail drawer attempts defensive playback and preserves an open-original fallback when a remote host blocks embedding or a URL is unavailable.
+Run these commands from the repository root:
 
-### Extensiones posteriores
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Build the shared package and start the API in watch mode |
+| `npm run dev:web` | Start the Vite web development server |
+| `npm run migrate` | Apply pending SQLite migrations |
+| `npm test` | Run the Vitest suite once |
+| `npm run test:watch` | Run Vitest in watch mode |
+| `npm run typecheck` | Typecheck every workspace |
+| `npm run build` | Build every workspace |
+| `npm run build:api` | Build the API |
+| `npm run build:web` | Build the web app |
+| `npm run build:extension` | Build the browser extension |
+| `npm run start` | Start the built API |
 
-El workspace conserva puntos de extensión para weighting, recencia, historial de uso de assets, safe areas más avanzadas y proveedores remotos de modelos. La generación actual usa selección aleatoria/reciente, reglas de crop, overlays y reemplazo manual como controles locales verificables.
+Before opening a pull request, run:
 
-La tabla de unión mantiene los proyectos desacoplados del origen Pinterest. Las partes más frágiles siguen siendo la detección de metadata/board ID y los selectores del DOM Pinterest; el API y la deduplicación quedan aislados en `packages/shared` y `apps/api` para que esos cambios no contaminen el almacenamiento.
+```bash
+npm run typecheck
+npm test
+npm run build
+```
 
-## Phase 3: content workflow
+## Documentation
 
-El flujo actual de proyectos permite crear y editar proyectos con nombre, nicho, idioma, notas, preferencias visuales y colecciones de origen. Dentro de cada proyecto se puede crear un borrador de imagen única, carrusel o video slideshow, seleccionar fuentes únicas, reordenar y bloquear imágenes, generar narrativa estructurada, editar y bloquear copy, producir un preview local y confirmar la generación final.
+- [`docs/phase3-content-workflow.md`](docs/phase3-content-workflow.md): project and content-generation workflow details.
+- [`docs/video-clipping.md`](docs/video-clipping.md): clipping architecture, provider setup, rendering, and limitations.
 
-Los estados, jobs, frames, assets derivados y errores quedan persistidos en SQLite. FFmpeg escribe en el directorio de contenido configurado en `Settings > Advanced`; los originales de Pinterest no se modifican. Los carruseles y videos tienen endpoints de descarga, y el paquete ZIP incluye los slides finales, metadata y caption.
+## Current scope
 
-La migración correspondiente es `apps/api/migrations/003_content_workflow.sql`. El detalle del flujo, los límites actuales y los comandos de verificación están en `docs/phase3-content-workflow.md`.
+Tokia is currently focused on local content research and generation. User authentication, multi-user collaboration, social publishing, scheduling, analytics, and automatic publishing integrations are outside the current local-first scope.
