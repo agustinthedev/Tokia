@@ -83,6 +83,7 @@ import {
 } from "./clipping-service.js";
 import { MediaProcessingError } from "./content-media.js";
 import { renderPreviewSegment } from "./clipping-media.js";
+import { convertHeicToJpeg } from "./image-conversion.js";
 
 type AppSettings = typeof defaultConfig;
 type QueryRecord = Record<string, string | undefined>;
@@ -129,6 +130,9 @@ function isPinterestCdnUrl(value: string | null | undefined): boolean {
   } catch {
     return false;
   }
+}
+function isHeicImage(contentType: string | null, url: string): boolean {
+  return /image\/hei[cf]/i.test(contentType ?? "") || /\.(?:heic|heif)(?:[?#]|$)/i.test(url);
 }
 async function fetchRemoteVideo(url: string, request: FastifyRequest, referer: string | null): Promise<Response> {
   return fetch(url, { headers: remoteVideoRequestHeaders(request, referer) });
@@ -676,6 +680,7 @@ export async function buildApp(
     requestIdHeader: "x-request-id",
     genReqId: () => crypto.randomUUID(),
   });
+  const convertedImageCache = new Map<string, Promise<Buffer>>();
   app.addContentTypeParser(
     "application/octet-stream",
     { parseAs: "buffer" },
@@ -1487,12 +1492,29 @@ export async function buildApp(
         .filter((value): value is string => isPinterestCdnUrl(value));
       const candidates = Array.from(new Set(sourceUrls.flatMap((url) => pinterestImageCandidates(url))));
       let upstream: Response | null = null;
+      let upstreamUrl: string | null = null;
       for (const candidate of candidates) {
         try {
           const response = await fetchRemoteImage(candidate, referer);
           const contentType = response.headers.get("content-type");
           if (response.ok && response.body && (!contentType || /^image\//i.test(contentType))) {
+            if (isHeicImage(contentType, candidate)) {
+              const cacheKey = `${id}:${candidate}`;
+              let conversion = convertedImageCache.get(cacheKey);
+              if (!conversion) {
+                conversion = convertHeicToJpeg(new Uint8Array(await response.arrayBuffer()));
+                convertedImageCache.set(cacheKey, conversion);
+              }
+              try {
+                const jpeg = await conversion;
+                return reply.code(200).type("image/jpeg").header("Cache-Control", "no-store").send(jpeg);
+              } catch {
+                convertedImageCache.delete(cacheKey);
+                continue;
+              }
+            }
             upstream = response;
+            upstreamUrl = candidate;
             break;
           }
           await response.body?.cancel();
@@ -1500,7 +1522,7 @@ export async function buildApp(
           // Try the next Pinterest CDN variant when a source is unavailable.
         }
       }
-      if (!upstream || !upstream.body)
+      if (!upstream || !upstream.body || !upstreamUrl)
         return reply.code(404).send({
           error: { code: "IMAGE_SOURCE_UNAVAILABLE", message: "The Pinterest image could not be loaded" },
         });
