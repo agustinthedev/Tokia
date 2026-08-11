@@ -509,6 +509,13 @@ Do not create the pull request in any other accessible repository.
 
 Do not merge the pull request unless explicitly instructed.
 
+Unless the user explicitly instructs otherwise, when the requested work is
+complete, all intentional changes have been committed, and validation has
+finished, create the pull request as **ready for review**. Do not create it as
+a draft. Create a draft pull request only when the user explicitly requests
+that state. If the work is not ready, continue working or report the blocker
+instead of presenting an incomplete change as ready.
+
 Use a clear PR title describing the outcome of the change.
 
 The PR description should normally contain:
