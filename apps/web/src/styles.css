@@ -188,6 +188,9 @@ h3 { font-size: 16px; letter-spacing: -.02em; }
 .frame-lock-button.is-unlocked { color: #66778e; background: #fff; }
 .frame-lock-button.is-locked { color: #9b6500; background: #fff1d6; border-color: #f1c66f; }
 .frame-lock-button.is-locked:hover:not(:disabled) { color: #805300; background: #ffe8b5; border-color: #e9ae43; }
+.frame-audio-button.is-unmuted { color: #66778e; background: #fff; }
+.frame-audio-button.is-muted { color: #9b6500; background: #fff1d6; border-color: #f1c66f; }
+.frame-audio-button.is-muted:hover:not(:disabled) { color: #805300; background: #ffe8b5; border-color: #e9ae43; }
 .frame-source-search {
   border: 1px solid #dfe6ee;
   border-radius: 11px;
