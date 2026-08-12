@@ -432,7 +432,6 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issueNumber = context.issue.number;
-            const issue = context.payload.issue || {};
             const branchName = process.env.BRANCH_NAME;
             const summary = fs.readFileSync(process.env.SUMMARY_FILE, 'utf8').trim();
             const commitSummary = fs.readFileSync(process.env.COMMIT_SUMMARY_FILE, 'utf8').trim();
@@ -449,7 +448,14 @@ jobs:
               },
             );
 
-            const typeLabel = (issue.labels || [])
+            const currentIssueResponse = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: issueNumber,
+            });
+            const currentIssue = currentIssueResponse.data;
+
+            const typeLabel = (currentIssue.labels || [])
               .map((label) => typeof label === 'string' ? label : label.name)
               .find((label) => label?.startsWith('type:'))
               ?.slice('type:'.length);
@@ -460,6 +466,12 @@ jobs:
               product: 'feat',
             }[typeLabel] || 'chore';
 
+            const labelsToPropagate = [...new Set(
+              (currentIssue.labels || [])
+                .map((label) => typeof label === 'string' ? label : label.name)
+                .filter((label) => label && !label.startsWith('status:')),
+            )];
+
             let pullRequest = existingPullRequests[0];
             if (!pullRequest) {
               const response = await github.rest.pulls.create({
@@ -467,7 +479,7 @@ jobs:
                 repo,
                 head: branchName,
                 base: 'master',
-                title: `${titlePrefix}: ${String(issue.title || 'implement accepted issue').trim()}`.slice(0, 256),
+                title: `${titlePrefix}: ${String(currentIssue.title || 'implement accepted issue').trim()}`.slice(0, 256),
                 body: [
                   '## Summary',
                   `Implements #${issueNumber}.`,
@@ -489,6 +501,24 @@ jobs:
               pullRequest = response.data;
             } else {
               core.info(`An open implementation PR already exists: #${pullRequest.number}`);
+            }
+
+            if (labelsToPropagate.length > 0) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: pullRequest.number,
+                  labels: labelsToPropagate,
+                });
+                core.info(`Propagated labels to implementation PR: ${labelsToPropagate.join(', ')}`);
+              } catch (error) {
+                if (error?.status === 404 || error?.status === 422) {
+                  core.warning(`The implementation PR was created, but its labels could not be propagated: ${error.message}`);
+                } else {
+                  throw error;
+                }
+              }
             }
 
             const comments = await github.paginate(
