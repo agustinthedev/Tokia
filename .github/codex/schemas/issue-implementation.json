@@ -21,7 +21,8 @@
         "required": [
           "message",
           "files",
-          "expected_failure"
+          "expected_failure",
+          "failure_reason"
         ],
         "properties": {
           "message": {
