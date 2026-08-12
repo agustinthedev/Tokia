@@ -16,7 +16,6 @@ jobs:
     outputs:
       run_implementation: ${{ steps.prepare.outputs.run_implementation }}
       branch_name: ${{ steps.prepare.outputs.branch_name }}
-      issue_type: ${{ steps.prepare.outputs.issue_type }}
     steps:
       - name: Validate the issue and update its status
         id: prepare
@@ -36,11 +35,8 @@ jobs:
             });
             const issue = issueResponse.data;
             const labels = issue.labels.map((label) => typeof label === 'string' ? label : label.name);
-            const issueType = labels.find((label) => label?.startsWith('type:'))?.slice('type:'.length) || 'general';
-
             core.setOutput('branch_name', branchName);
             core.setOutput('run_implementation', 'false');
-            core.setOutput('issue_type', issueType);
 
             if (issue.state !== 'open') {
               core.info('The issue is not open; skipping implementation.');
@@ -116,7 +112,6 @@ jobs:
     env:
       BRANCH_NAME: ${{ needs.gate.outputs.branch_name }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
-      ISSUE_TYPE: ${{ needs.gate.outputs.issue_type }}
     steps:
       - name: Check out the default branch
         uses: actions/checkout@v5
@@ -209,7 +204,9 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: .github/codex/runtime/issue-implementation.md
-          output-file: .github/codex/runtime/issue-implementation-output.md
+          output-file: .github/codex/runtime/issue-implementation-output.json
+          codex-args: >-
+            ["--output-schema", ".github/codex/schemas/issue-implementation.json"]
           sandbox: workspace-write
           safety-strategy: drop-sudo
 
@@ -221,85 +218,195 @@ jobs:
         run: |
           set -euo pipefail
 
+          output_file="${RUNNER_TEMP}/codex-implementation-output.json"
           summary_file="${RUNNER_TEMP}/codex-implementation-report.md"
-          if [[ -f .github/codex/runtime/issue-implementation-output.md ]]; then
-            cp .github/codex/runtime/issue-implementation-output.md "${summary_file}"
+          commit_summary_file="${RUNNER_TEMP}/codex-implementation-commits.md"
+
+          if [[ -f .github/codex/runtime/issue-implementation-output.json ]]; then
+            cp .github/codex/runtime/issue-implementation-output.json "${output_file}"
           else
-            printf '%s\n' 'Codex did not produce an implementation report.' > "${summary_file}"
+            printf '%s\n' '{}' > "${output_file}"
           fi
 
           rm -rf .github/codex/runtime
 
-          mapfile -t changed_files < <(
-            {
-              git diff --name-only
-              git diff --cached --name-only
-              git ls-files --others --exclude-standard
-            } | sort -u
-          )
+          CODEX_OUTPUT_FILE="${output_file}" \
+          SUMMARY_FILE="${summary_file}" \
+          COMMIT_SUMMARY_FILE="${commit_summary_file}" \
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const { execFileSync } = require('child_process');
 
-          if ((${#changed_files[@]} > 0)); then
-            for file in "${changed_files[@]}"; do
-              case "${file}" in
-                .env|.env.local|.env.development|.env.production|*.pem|*.key|*.p12|*.pfx)
-                  echo "Refusing to commit sensitive-looking file: ${file}" >&2
-                  exit 1
-                  ;;
-              esac
-            done
+          function git(args, options = {}) {
+            const result = execFileSync('git', args, {
+              encoding: 'utf8',
+              ...options,
+            });
+            return typeof result === 'string' ? result.trim() : '';
+          }
 
-            test_files=()
-            implementation_files=()
-            for file in "${changed_files[@]}"; do
-              case "${file}" in
-                *.test.*|*.spec.*|tests/*|*/tests/*)
-                  test_files+=("${file}")
-                  ;;
-                *)
-                  implementation_files+=("${file}")
-                  ;;
-              esac
-            done
+          function fail(message) {
+            throw new Error(message);
+          }
 
-            scope="$(printf '%s' "${ISSUE_TYPE:-general}" | tr -c '[:alnum:]-' '-' | sed 's/-*$//')"
-            [[ -n "${scope}" ]] || scope='general'
-            case "${ISSUE_TYPE:-general}" in
-              product) implementation_prefix='feat' ;;
-              tech-debt) implementation_prefix='refactor' ;;
-              bug|security) implementation_prefix='fix' ;;
-              *) implementation_prefix='chore' ;;
-            esac
+          function requireString(value, label) {
+            if (typeof value !== 'string' || value.trim() === '') {
+              fail(`${label} must be a non-empty string.`);
+            }
+            return value.trim();
+          }
 
-            if ((${#test_files[@]} > 0)); then
-              git add -- "${test_files[@]}"
-              git diff --cached --check
-              git commit -m "test(${scope}): add coverage for issue #${ISSUE_NUMBER}"
-            fi
+          const outputPath = process.env.CODEX_OUTPUT_FILE;
+          let output;
+          try {
+            output = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+          } catch (error) {
+            fail(`Codex output is missing or is not valid JSON: ${error.message}`);
+          }
 
-            if ((${#implementation_files[@]} > 0)); then
-              git add -- "${implementation_files[@]}"
-              git diff --cached --check
-              git commit -m "${implementation_prefix}(${scope}): implement issue #${ISSUE_NUMBER}"
-            fi
+          if (!output || typeof output !== 'object' || Array.isArray(output)) {
+            fail('Codex output must be a JSON object.');
+          }
 
-            if [[ -n "$(git status --porcelain)" ]]; then
-              echo 'The runner could not commit every intentional change.' >&2
-              git status --short >&2
-              exit 1
-            fi
-          fi
+          const implementationSummary = requireString(
+            output.implementation_summary,
+            'implementation_summary',
+          );
+          if (!Array.isArray(output.commits)) fail('commits must be an array.');
+          if (!Array.isArray(output.checks)) fail('checks must be an array.');
+          if (!Array.isArray(output.limitations)) fail('limitations must be an array.');
+
+          const changedFiles = [...new Set([
+            ...git(['diff', '--name-only']).split('\n'),
+            ...git(['diff', '--cached', '--name-only']).split('\n'),
+            ...git(['ls-files', '--others', '--exclude-standard']).split('\n'),
+          ].filter(Boolean))].sort();
+          const changedSet = new Set(changedFiles);
+          const assignedFiles = new Set();
+          const conventionalCommit = /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^()\n]+\))?: [^\n]+$/;
+
+          for (const [index, commit] of output.commits.entries()) {
+            if (!commit || typeof commit !== 'object' || Array.isArray(commit)) {
+              fail(`commits[${index}] must be an object.`);
+            }
+
+            const message = requireString(commit.message, `commits[${index}].message`);
+            if (!conventionalCommit.test(message)) {
+              fail(`commits[${index}].message is not a conventional commit subject: ${message}`);
+            }
+            if (!Array.isArray(commit.files) || commit.files.length === 0) {
+              fail(`commits[${index}].files must contain at least one file.`);
+            }
+            if (typeof commit.expected_failure !== 'boolean') {
+              fail(`commits[${index}].expected_failure must be a boolean.`);
+            }
+            if (commit.expected_failure && !message.startsWith('test')) {
+              fail(`commits[${index}] marks a non-test commit as an expected failure.`);
+            }
+            if (commit.expected_failure && !requireString(
+              commit.failure_reason,
+              `commits[${index}].failure_reason`,
+            )) {
+              fail(`commits[${index}].failure_reason is required for an expected failure.`);
+            }
+            if (commit.expected_failure && index === output.commits.length - 1) {
+              fail(`commits[${index}] is expected to fail but has no later implementation commit.`);
+            }
+
+            for (const file of commit.files) {
+              requireString(file, `commits[${index}].files entry`);
+              if (path.isAbsolute(file) || path.posix.normalize(file).startsWith('../')) {
+                fail(`Commit plan contains a path outside the repository: ${file}`);
+              }
+              if (!changedSet.has(file)) {
+                fail(`Commit plan references a file that Codex did not change: ${file}`);
+              }
+              if (assignedFiles.has(file)) {
+                fail(`File appears in more than one commit group: ${file}`);
+              }
+              assignedFiles.add(file);
+            }
+          }
+
+          for (const file of changedFiles) {
+            if (file === '.github/codex/runtime/issue-implementation-output.json') continue;
+            if (/^(\.env|\.env\.(local|development|production))$/.test(file)
+              || /\.(pem|key|p12|pfx)$/.test(file)) {
+              fail(`Refusing to commit sensitive-looking file: ${file}`);
+            }
+            if (!assignedFiles.has(file)) {
+              fail(`Changed file is missing from the commit plan: ${file}`);
+            }
+          }
+
+          if (assignedFiles.size !== changedFiles.length) {
+            fail('The commit plan does not account for every changed file.');
+          }
+
+          for (const [index, commit] of output.commits.entries()) {
+            const args = ['add', '--', ...commit.files];
+            git(args, { stdio: 'inherit' });
+            git(['diff', '--cached', '--check'], { stdio: 'inherit' });
+
+            const commitArgs = ['commit', '-m', commit.message];
+            if (commit.expected_failure) {
+              commitArgs.push(
+                '-m',
+                [
+                  'This test-first commit is intentionally expected to fail until a subsequent implementation commit.',
+                  commit.failure_reason.trim(),
+                ].join(' '),
+              );
+            }
+            git(commitArgs, { stdio: 'inherit' });
+          }
+
+          if (git(['status', '--porcelain'])) {
+            git(['status', '--short'], { stdio: 'inherit' });
+            fail('The runner could not commit every intentional change.');
+          }
+
+          const markdown = [
+            '## Implementation summary',
+            implementationSummary,
+            '',
+            '## Checks',
+            output.checks.length > 0
+              ? output.checks.map((check) => {
+                  const name = requireString(check?.name, 'check.name');
+                  const status = requireString(check?.status, `check ${name} status`);
+                  const details = typeof check.details === 'string' && check.details.trim()
+                    ? ` - ${check.details.trim()}`
+                    : '';
+                  return `- **${status}**: ${name}${details}`;
+                }).join('\n')
+              : '- No checks were reported.',
+            '',
+            '## Limitations',
+            output.limitations.length > 0
+              ? output.limitations.map((limitation) => `- ${requireString(limitation, 'limitation')}`).join('\n')
+              : '- None reported.',
+          ].join('\n');
+          fs.writeFileSync(process.env.SUMMARY_FILE, `${markdown}\n`, 'utf8');
+
+          const commitSummary = git(['log', '--reverse', '--format=- `%h` %s%n%b', 'origin/master..HEAD']);
+          fs.writeFileSync(
+            process.env.COMMIT_SUMMARY_FILE,
+            `${commitSummary || 'No implementation commits were created.'}\n`,
+            'utf8',
+          );
+          NODE
 
           commit_count="$(git rev-list --count origin/master..HEAD)"
           if [[ "${commit_count}" -eq 0 ]]; then
-            echo 'Codex did not create any implementation commits.' >&2
             printf 'has_changes=false\n' >> "${GITHUB_OUTPUT}"
             printf 'summary_file=%s\n' "${summary_file}" >> "${GITHUB_OUTPUT}"
+            printf 'commit_summary_file=%s\n' "${commit_summary_file}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
           git diff --check origin/master...HEAD
-          commit_summary_file="${RUNNER_TEMP}/codex-implementation-commits.md"
-          git log --reverse --format='- `%h` %s' origin/master..HEAD > "${commit_summary_file}"
 
           auth_header="$(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w 0)"
           git -c "http.extraheader=AUTHORIZATION: basic ${auth_header}" push origin "HEAD:${BRANCH_NAME}"
