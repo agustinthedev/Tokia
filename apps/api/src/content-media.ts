@@ -329,6 +329,7 @@ export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath
   const inputArgs: string[] = [];
   const filters: string[] = [];
   const textPaths: string[] = [];
+  const filterGraphPath = `${options.outputPath}.filtergraph`;
   const videoLabels: string[] = [];
   const audioLabels: string[] = [];
   let inputCount = 0;
@@ -392,10 +393,11 @@ export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath
       audioOutput = '[audio-output]';
     }
     const encoding = SLIDESHOW_VIDEO_ENCODINGS[options.configuration.video.qualityMode] ?? SLIDESHOW_VIDEO_ENCODING;
+    await fsp.writeFile(filterGraphPath, filters.join(';\n'), 'utf8');
     await runFfmpeg(options.ffmpegPath, [
       '-y',
       ...inputArgs,
-      '-filter_complex', filters.join(';'),
+      '-filter_complex_script', filterGraphPath,
       '-map', videoOutput,
       '-map', audioOutput,
       ...slideshowVideoEncodingArgs(options.configuration.video.qualityMode),
@@ -407,7 +409,7 @@ export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath
       options.outputPath,
     ]);
   } finally {
-    await Promise.all(textPaths.map((textPath) => fsp.rm(textPath, { force: true })));
+    await Promise.all([...textPaths, filterGraphPath].map((filePath) => fsp.rm(filePath, { force: true })));
   }
   return { width, height, durationMs: Math.round((scenes.reduce((total, scene) => total + sceneDuration(scene, options.configuration), 0) - transitionDuration * (scenes.length - 1)) * 1000) };
 }
