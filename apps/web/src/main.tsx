@@ -4000,6 +4000,24 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                     <option value="none">None</option>
                   </select>
                 </label>
+                {config.video?.transition === "fade" && (
+                  <label className="form-field">
+                    <span>Fade duration (seconds)</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="2"
+                      step="0.05"
+                      value={config.video?.transitionDuration ?? 0.35}
+                      onChange={(event) =>
+                        updateConfig("video", {
+                          ...config.video,
+                          transitionDuration: Number(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                )}
               </div>
               <label className="toggle-row">
                 <input
