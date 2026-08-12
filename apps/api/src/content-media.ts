@@ -11,28 +11,55 @@ export class MediaProcessingError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = 'MediaProcessingError'; }
 }
 
-export const SLIDESHOW_VIDEO_ENCODING = Object.freeze({
-  codec: 'libx264',
-  preset: 'slow',
-  profile: 'high',
-  level: '4.2',
-  bitrate: '10M',
-  maxRate: '12M',
-  bufferSize: '24M',
-  pixelFormat: 'yuv420p',
-  audioBitrate: '192k'
+export const SLIDESHOW_VIDEO_ENCODINGS = Object.freeze({
+  balanced: Object.freeze({
+    codec: 'libx264',
+    preset: 'medium',
+    profile: 'high',
+    level: '4.2',
+    crf: 20,
+    maxRate: '8M',
+    bufferSize: '16M',
+    pixelFormat: 'yuv420p',
+    audioBitrate: '160k'
+  }),
+  high: Object.freeze({
+    codec: 'libx264',
+    preset: 'slow',
+    profile: 'high',
+    level: '4.2',
+    crf: 18,
+    maxRate: '12M',
+    bufferSize: '24M',
+    pixelFormat: 'yuv420p',
+    audioBitrate: '192k'
+  }),
+  maximum: Object.freeze({
+    codec: 'libx264',
+    preset: 'slower',
+    profile: 'high',
+    level: '4.2',
+    crf: 16,
+    maxRate: '20M',
+    bufferSize: '40M',
+    pixelFormat: 'yuv420p',
+    audioBitrate: '256k'
+  })
 });
 
-function slideshowVideoEncodingArgs(): string[] {
+export const SLIDESHOW_VIDEO_ENCODING = SLIDESHOW_VIDEO_ENCODINGS.high;
+
+function slideshowVideoEncodingArgs(qualityMode: ContentConfiguration['video']['qualityMode']): string[] {
+  const encoding = SLIDESHOW_VIDEO_ENCODINGS[qualityMode] ?? SLIDESHOW_VIDEO_ENCODING;
   return [
-    '-c:v', SLIDESHOW_VIDEO_ENCODING.codec,
-    '-preset', SLIDESHOW_VIDEO_ENCODING.preset,
-    '-profile:v', SLIDESHOW_VIDEO_ENCODING.profile,
-    '-level', SLIDESHOW_VIDEO_ENCODING.level,
-    '-b:v', SLIDESHOW_VIDEO_ENCODING.bitrate,
-    '-maxrate', SLIDESHOW_VIDEO_ENCODING.maxRate,
-    '-bufsize', SLIDESHOW_VIDEO_ENCODING.bufferSize,
-    '-pix_fmt', SLIDESHOW_VIDEO_ENCODING.pixelFormat
+    '-c:v', encoding.codec,
+    '-preset', encoding.preset,
+    '-profile:v', encoding.profile,
+    '-level', encoding.level,
+    '-crf', String(encoding.crf),
+    '-maxrate', encoding.maxRate,
+    '-bufsize', encoding.bufferSize,
+    '-pix_fmt', encoding.pixelFormat
   ];
 }
 
@@ -110,10 +137,41 @@ async function hasAudioTrack(ffprobePath: string, sourcePath: string): Promise<b
   });
 }
 
-function filterFor(configuration: ContentConfiguration, width: number, height: number): string {
+export interface MediaDimensions {
+  width: number;
+  height: number;
+}
+
+async function probeDimensions(ffprobePath: string, sourcePath: string): Promise<MediaDimensions> {
+  return await new Promise<MediaDimensions>((resolve, reject) => {
+    const child = spawn(ffprobePath, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', sourcePath], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); if (stderr.length > 8_000) stderr = stderr.slice(-8_000); });
+    child.on('error', (error) => reject(new MediaProcessingError('FFPROBE_UNAVAILABLE', error.message)));
+    child.on('close', (code) => {
+      const match = stdout.trim().match(/^(\d+)x(\d+)/);
+      if (code === 0 && match) return resolve({ width: Number(match[1]), height: Number(match[2]) });
+      reject(new MediaProcessingError('FFPROBE_FAILED', stderr.trim().split(/\r?\n/).slice(-3).join(' ') || `FFprobe exited with code ${code}.`));
+    });
+  });
+}
+
+async function probeDimensionsIfAvailable(ffprobePath: string, sourcePath: string): Promise<MediaDimensions | undefined> {
+  try { return await probeDimensions(ffprobePath, sourcePath); } catch { return undefined; }
+}
+
+export function shouldUpscale(source: MediaDimensions | undefined, target: MediaDimensions): boolean {
+  return Boolean(source && (source.width < target.width || source.height < target.height));
+}
+
+export function filterFor(configuration: ContentConfiguration, width: number, height: number, source?: MediaDimensions): string {
   const crop = configuration.visual.cropMode;
-  if (crop === 'fit' || crop === 'pad') return `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
-  return `scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,crop=${width}:${height}`;
+  const resize = crop === 'fit' || crop === 'pad'
+    ? `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`
+    : `scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,crop=${width}:${height}`;
+  return shouldUpscale(source, { width, height }) ? `${resize},unsharp=5:5:0.35:5:5:0` : resize;
 }
 
 export interface TextOverlay {
@@ -212,9 +270,10 @@ export function textOverlayLayout(configuration: ContentConfiguration, width: nu
   return parts;
 }
 
-export async function normalizeImage(options: { ffmpegPath: string; sourcePath: string; outputPath: string; configuration: ContentConfiguration; text?: TextOverlay | null; }): Promise<{ width: number; height: number }> {
+export async function normalizeImage(options: { ffmpegPath: string; ffprobePath?: string; sourcePath: string; outputPath: string; configuration: ContentConfiguration; text?: TextOverlay | null; }): Promise<{ width: number; height: number }> {
   const { width, height } = ratioDimensions(options.configuration.aspectRatio, options.configuration.video.outputResolution === '1080p' ? '1080p' : '720p');
-  const filters = [filterFor(options.configuration, width, height)];
+  const sourceDimensions = await probeDimensionsIfAvailable(options.ffprobePath ?? defaultFfprobePath(options.ffmpegPath), options.sourcePath);
+  const filters = [filterFor(options.configuration, width, height, sourceDimensions)];
   const textPaths: string[] = [];
   try {
     if (options.text && options.configuration.textMode !== 'none') {
@@ -248,113 +307,107 @@ export interface SlideshowScene {
   text?: TextOverlay | null;
 }
 
-async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowScene; outputPath: string; configuration: ContentConfiguration; width: number; height: number; hasAudio: boolean }): Promise<void> {
-  const { scene, configuration, width, height } = options;
-  const filters = [filterFor(configuration, width, height)];
-  const textPaths: string[] = [];
-  try {
-    if (scene.text && configuration.textMode !== 'none') {
-      for (const part of textOverlayLayout(configuration, width, height, scene.text)) {
-        const textPath = `${options.outputPath}.${part.key}.txt`;
-        textPaths.push(textPath);
-        await fsp.writeFile(textPath, part.text.slice(0, part.key === 'headline' ? 120 : 600), 'utf8');
-        const box = configuration.visual.overlay ? `:box=1:boxcolor=black@${Math.max(0, Math.min(1, configuration.visual.overlayOpacity))}:boxborderw=${part.boxBorderWidth}` : '';
-        filters.push(`drawtext=fontfile='${escapedFilterPath(part.fontFile)}':textfile='${escapedFilterPath(textPath)}':fontcolor=${configuration.visual.textColor}:fontsize=${part.fontSize}:x=${part.x}:y=${part.y}:line_spacing=${part.lineSpacing}${box}`);
-      }
-    }
-    const duration = sceneDuration(scene, configuration);
-    const useSourceAudio = scene.mediaType === 'video' && scene.muted !== true && options.hasAudio;
-    const input = scene.mediaType === 'video'
-      ? [ ...(Number(scene.startSeconds) > 0 ? ['-ss', String(scene.startSeconds)] : []), '-i', scene.path ]
-      : ['-loop', '1', '-i', scene.path];
-    const audioInput = useSourceAudio ? [] : ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'];
-    const audioMap = useSourceAudio ? '0:a:0' : '1:a:0';
-    await runFfmpeg(options.ffmpegPath, [
-      '-y',
-      ...input,
-      ...audioInput,
-      '-t', String(duration),
-      '-map', '0:v:0',
-      '-map', audioMap,
-      '-vf', `${filters.join(',')},format=yuv420p`,
-      '-r', String(Math.max(1, Math.min(60, configuration.video.fps))),
-      ...slideshowVideoEncodingArgs(),
-      '-c:a', 'aac',
-      '-ar', '48000',
-      '-ac', '2',
-      '-b:a', SLIDESHOW_VIDEO_ENCODING.audioBitrate,
-      '-af', 'apad',
-      '-movflags', '+faststart',
-      options.outputPath,
-    ]);
-  } finally {
-    await Promise.all(textPaths.map((textPath) => fsp.rm(textPath, { force: true })));
-  }
-}
-
 function sceneDuration(scene: SlideshowScene, configuration: ContentConfiguration): number {
   const rangeDuration = Number(scene.endSeconds) - Number(scene.startSeconds ?? 0);
   return Math.max(0.1, Number.isFinite(rangeDuration) ? rangeDuration : Number(scene.durationSeconds) || configuration.video.secondsPerImage);
 }
 
 export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath?: string; imagePaths?: string[]; scenes?: SlideshowScene[]; outputPath: string; configuration: ContentConfiguration }): Promise<{ width: number; height: number; durationMs: number }> {
-  const scenes = options.scenes ?? (options.imagePaths ?? []).map((imagePath) => ({ path: imagePath, mediaType: 'image' as const, durationSeconds: options.configuration.video.secondsPerImage }));
+  const scenes: SlideshowScene[] = options.scenes ?? (options.imagePaths ?? []).map((imagePath) => ({ path: imagePath, mediaType: 'image' as const, durationSeconds: options.configuration.video.secondsPerImage }));
   if (!scenes.length) throw new MediaProcessingError('NO_IMAGES', 'At least one image or video is required for a video slideshow.');
   const dimensions = ratioDimensions(options.configuration.aspectRatio, options.configuration.video.outputResolution);
   // H.264 with yuv420p requires even dimensions. Keep image exports at their
   // requested dimensions, but make the video canvas encoder-safe.
   const width = dimensions.width % 2 === 0 ? dimensions.width : dimensions.width + 1;
   const height = dimensions.height % 2 === 0 ? dimensions.height : dimensions.height + 1;
-  const listPath = `${options.outputPath}.concat.txt`;
-  const clipPaths = scenes.map((_, index) => `${options.outputPath}.scene-${String(index + 1).padStart(2, '0')}.mp4`);
   const ffprobePath = options.ffprobePath ?? defaultFfprobePath(options.ffmpegPath);
+  const fps = Math.max(1, Math.min(60, options.configuration.video.fps));
   const configuredTransitionDuration = Number(options.configuration.video.transitionDuration);
   const transitionDuration = options.configuration.video.transition === 'fade' && scenes.length > 1 && Number.isFinite(configuredTransitionDuration) && configuredTransitionDuration > 0
     ? Math.min(configuredTransitionDuration, ...scenes.map((scene) => Math.max(0, sceneDuration(scene, options.configuration) - 0.1)))
     : 0;
+  const inputArgs: string[] = [];
+  const filters: string[] = [];
+  const textPaths: string[] = [];
+  const videoLabels: string[] = [];
+  const audioLabels: string[] = [];
+  let inputCount = 0;
   try {
     for (let index = 0; index < scenes.length; index += 1) {
       const scene = scenes[index]!;
+      const duration = sceneDuration(scene, options.configuration);
       const hasAudio = scene.mediaType === 'video' && scene.muted !== true ? await hasAudioTrack(ffprobePath, scene.path) : false;
-      await renderSceneClip({ ffmpegPath: options.ffmpegPath, scene, outputPath: clipPaths[index]!, configuration: options.configuration, width, height, hasAudio });
+      const sourceDimensions = await probeDimensionsIfAvailable(ffprobePath, scene.path);
+      const videoInputIndex = inputCount;
+      if (scene.mediaType === 'video') {
+        if (Number(scene.startSeconds) > 0) inputArgs.push('-ss', String(scene.startSeconds));
+        inputArgs.push('-i', scene.path);
+      } else {
+        inputArgs.push('-loop', '1', '-framerate', String(fps), '-i', scene.path);
+      }
+      inputCount += 1;
+      const audioInputIndex = hasAudio ? videoInputIndex : inputCount;
+      if (!hasAudio) {
+        inputArgs.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+        inputCount += 1;
+      }
+      const textFilters: string[] = [];
+      if (scene.text && options.configuration.textMode !== 'none') {
+        for (const part of textOverlayLayout(options.configuration, width, height, scene.text)) {
+          const textPath = `${options.outputPath}.scene-${String(index + 1).padStart(2, '0')}.${part.key}.txt`;
+          textPaths.push(textPath);
+          await fsp.writeFile(textPath, part.text.slice(0, part.key === 'headline' ? 120 : 600), 'utf8');
+          const box = options.configuration.visual.overlay ? `:box=1:boxcolor=black@${Math.max(0, Math.min(1, options.configuration.visual.overlayOpacity))}:boxborderw=${part.boxBorderWidth}` : '';
+          textFilters.push(`drawtext=fontfile='${escapedFilterPath(part.fontFile)}':textfile='${escapedFilterPath(textPath)}':fontcolor=${options.configuration.visual.textColor}:fontsize=${part.fontSize}:x=${part.x}:y=${part.y}:line_spacing=${part.lineSpacing}${box}`);
+        }
+      }
+      const videoLabel = `scene-v${index}`;
+      const audioLabel = `scene-a${index}`;
+      const videoFilter = `${filterFor(options.configuration, width, height, sourceDimensions)}${textFilters.length ? `,${textFilters.join(',')}` : ''},format=yuv420p,fps=${fps},trim=duration=${duration},setpts=PTS-STARTPTS`;
+      filters.push(`[${videoInputIndex}:v:0]${videoFilter}[${videoLabel}]`);
+      filters.push(`[${audioInputIndex}:a:0]atrim=duration=${duration},asetpts=PTS-STARTPTS,aresample=48000,apad,atrim=duration=${duration}[${audioLabel}]`);
+      videoLabels.push(`[${videoLabel}]`);
+      audioLabels.push(`[${audioLabel}]`);
     }
+
+    let videoOutput: string;
+    let audioOutput: string;
     if (transitionDuration > 0) {
-      const filters: string[] = [];
-      let videoInput = '[0:v]';
-      let audioInput = '[0:a]';
+      videoOutput = videoLabels[0]!;
+      audioOutput = audioLabels[0]!;
       let elapsed = sceneDuration(scenes[0]!, options.configuration);
       for (let index = 1; index < scenes.length; index += 1) {
-        const videoOutput = `v${index}`;
-        const audioOutput = `a${index}`;
+        const nextVideo = `transition-v${index}`;
+        const nextAudio = `transition-a${index}`;
         const offset = elapsed - transitionDuration * index;
-        filters.push(`${videoInput}[${index}:v]xfade=transition=fade:duration=${transitionDuration}:offset=${offset}[${videoOutput}]`);
-        filters.push(`${audioInput}[${index}:a]acrossfade=d=${transitionDuration}:c1=tri:c2=tri[${audioOutput}]`);
-        videoInput = `[${videoOutput}]`;
-        audioInput = `[${audioOutput}]`;
+        filters.push(`${videoOutput}${videoLabels[index]!}xfade=transition=fade:duration=${transitionDuration}:offset=${offset}[${nextVideo}]`);
+        filters.push(`${audioOutput}${audioLabels[index]!}acrossfade=d=${transitionDuration}:c1=tri:c2=tri[${nextAudio}]`);
+        videoOutput = `[${nextVideo}]`;
+        audioOutput = `[${nextAudio}]`;
         elapsed += sceneDuration(scenes[index]!, options.configuration);
       }
-      await runFfmpeg(options.ffmpegPath, [
-        '-y',
-        ...clipPaths.flatMap((clipPath) => ['-i', clipPath]),
-        '-filter_complex', filters.join(';'),
-        '-map', videoInput,
-        '-map', audioInput,
-        ...slideshowVideoEncodingArgs(),
-        '-c:a', 'aac',
-        '-ar', '48000',
-        '-ac', '2',
-        '-b:a', SLIDESHOW_VIDEO_ENCODING.audioBitrate,
-        '-movflags', '+faststart',
-        options.outputPath,
-      ]);
     } else {
-      const lines = clipPaths.map((clipPath) => `file '${clipPath.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`);
-      await fsp.writeFile(listPath, lines.join('\n'), 'utf8');
-      await runFfmpeg(options.ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', options.outputPath]);
+      filters.push(`${scenes.flatMap((_, index) => `${videoLabels[index]!}${audioLabels[index]!}`).join('')}concat=n=${scenes.length}:v=1:a=1[video-output][audio-output]`);
+      videoOutput = '[video-output]';
+      audioOutput = '[audio-output]';
     }
+    const encoding = SLIDESHOW_VIDEO_ENCODINGS[options.configuration.video.qualityMode] ?? SLIDESHOW_VIDEO_ENCODING;
+    await runFfmpeg(options.ffmpegPath, [
+      '-y',
+      ...inputArgs,
+      '-filter_complex', filters.join(';'),
+      '-map', videoOutput,
+      '-map', audioOutput,
+      ...slideshowVideoEncodingArgs(options.configuration.video.qualityMode),
+      '-c:a', 'aac',
+      '-ar', '48000',
+      '-ac', '2',
+      '-b:a', encoding.audioBitrate,
+      '-movflags', '+faststart',
+      options.outputPath,
+    ]);
   } finally {
-    await fsp.rm(listPath, { force: true });
-    await Promise.all(clipPaths.map((clipPath) => fsp.rm(clipPath, { force: true })));
+    await Promise.all(textPaths.map((textPath) => fsp.rm(textPath, { force: true })));
   }
   return { width, height, durationMs: Math.round((scenes.reduce((total, scene) => total + sceneDuration(scene, options.configuration), 0) - transitionDuration * (scenes.length - 1)) * 1000) };
 }

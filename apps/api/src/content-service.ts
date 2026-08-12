@@ -231,7 +231,7 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
       const downloadPath = path.join(directory, `download-${String(index + 1).padStart(2, '0')}`);
       if (sourcePath) await fsp.copyFile(sourcePath, downloadPath);
       else await downloadBestSource(sourceUrl, downloadPath);
-      await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: downloadPath, outputPath: normalizedPath, configuration });
+      await normalizeImage({ ffmpegPath: settings.ffmpegPath, ffprobePath: settings.ffprobePath, sourcePath: downloadPath, outputPath: normalizedPath, configuration });
       await fsp.rm(downloadPath, { force: true });
       const sourceHash = await sha256File(normalizedPath);
       db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, sha256, metadata_json, created_at)
@@ -239,7 +239,7 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
     }
     const text = configuration.textMode === 'none' ? null : { headline: frame.headline, body: frame.body };
     const outputPath = path.join(directory, `${variant}-${String(index + 1).padStart(2, '0')}.png`);
-    const dimensions = await normalizeImage({ ffmpegPath: settings.ffmpegPath, sourcePath: normalizedPath, outputPath, configuration, text });
+    const dimensions = await normalizeImage({ ffmpegPath: settings.ffmpegPath, ffprobePath: settings.ffprobePath, sourcePath: normalizedPath, outputPath, configuration, text });
     renderedPaths.push(outputPath);
     if (row.type === 'video_slideshow') {
       scenes.push({ path: sourcePath ?? outputPath, mediaType: sourcePath ? 'video' : 'image', durationSeconds: durationSeconds ?? configuration.video.secondsPerImage, startSeconds: sourcePath ? trim?.startSeconds : undefined, endSeconds: sourcePath ? trim?.endSeconds : undefined, muted: sourcePath ? frameSettings.muted === true : false, text: sourcePath ? text : null });
@@ -254,7 +254,7 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
     videoPath = path.join(directory, `${variant}.mp4`);
     video = await renderSlideshow({ ffmpegPath: settings.ffmpegPath, ffprobePath: settings.ffprobePath, scenes, outputPath: videoPath, configuration });
     db.prepare(`INSERT INTO content_assets(id, content_id, frame_id, asset_type, variant, status, file_path, mime_type, width, height, duration_ms, sha256, metadata_json, created_at)
-      VALUES (?, ?, NULL, 'video', ?, 'ready', ?, 'video/mp4', ?, ?, ?, ?, ?, ?)`).run(id(), contentId, variant, videoPath, video.width, video.height, video.durationMs, await sha256File(videoPath), JSON.stringify({ fps: configuration.video.fps, secondsPerImage: configuration.video.secondsPerImage, sceneDurations: scenes.map((scene) => scene.durationSeconds), sourceTypes: scenes.map((scene) => scene.mediaType), mutedScenes: scenes.map((scene) => scene.muted === true) }), timestamp);
+      VALUES (?, ?, NULL, 'video', ?, 'ready', ?, 'video/mp4', ?, ?, ?, ?, ?, ?)`).run(id(), contentId, variant, videoPath, video.width, video.height, video.durationMs, await sha256File(videoPath), JSON.stringify({ fps: configuration.video.fps, qualityMode: configuration.video.qualityMode, secondsPerImage: configuration.video.secondsPerImage, sceneDurations: scenes.map((scene) => scene.durationSeconds), sourceTypes: scenes.map((scene) => scene.mediaType), mutedScenes: scenes.map((scene) => scene.muted === true) }), timestamp);
   }
   const first = videoPath ?? renderedPaths[0]; if (!first) throw new MediaProcessingError('NO_RENDERED_ASSET', 'No rendered frame was created.');
   const thumbnailPath = path.join(directory, `${variant}-thumbnail.webp`);

@@ -6,6 +6,8 @@ export const CONTENT_STATUSES = ['draft', 'preview_generating', 'preview_ready',
 export type ContentStatus = typeof CONTENT_STATUSES[number];
 export const TEXT_MODES = ['none', 'cover_only', 'headline_only', 'headline_and_body', 'custom_per_slide'] as const;
 export type TextMode = typeof TEXT_MODES[number];
+export const VIDEO_QUALITY_MODES = ['balanced', 'high', 'maximum'] as const;
+export type VideoQualityMode = typeof VIDEO_QUALITY_MODES[number];
 export const MAX_TOTAL_FRAMES = 100;
 export const MIN_FRAME_DURATION_SECONDS = 0.1;
 export const MAX_IMAGE_FRAME_DURATION_SECONDS = 30;
@@ -47,6 +49,7 @@ export interface ContentConfiguration {
   };
   video: {
     outputResolution: '720p' | '1080p';
+    qualityMode: VideoQualityMode;
     fps: number;
     secondsPerImage: number;
     transition: 'none' | 'fade';
@@ -90,6 +93,7 @@ export const DEFAULT_CONFIGURATION: ContentConfiguration = {
   },
   video: {
     outputResolution: '720p',
+    qualityMode: 'high',
     fps: 30,
     secondsPerImage: 2.5,
     transition: 'none',
@@ -107,6 +111,7 @@ export function mergeConfiguration(input: unknown, projectDefaults?: unknown): C
   merged.sourceCollectionIds = Array.isArray(source.sourceCollectionIds) ? source.sourceCollectionIds.filter((value): value is string => typeof value === 'string') : Array.isArray(defaults.sourceCollectionIds) ? defaults.sourceCollectionIds.filter((value): value is string => typeof value === 'string') : [];
   merged.visual = { ...DEFAULT_CONFIGURATION.visual, ...(defaults.visual as object ?? {}), ...(source.visual as object ?? {}) };
   merged.video = { ...DEFAULT_CONFIGURATION.video, ...(defaults.video as object ?? {}), ...(source.video as object ?? {}) };
+  merged.video.qualityMode = VIDEO_QUALITY_MODES.includes(merged.video.qualityMode) ? merged.video.qualityMode : DEFAULT_CONFIGURATION.video.qualityMode;
   const secondsPerImage = Number(merged.video.secondsPerImage);
   merged.video.secondsPerImage = Number.isFinite(secondsPerImage) ? Math.max(MIN_FRAME_DURATION_SECONDS, Math.min(MAX_IMAGE_FRAME_DURATION_SECONDS, secondsPerImage)) : DEFAULT_CONFIGURATION.video.secondsPerImage;
   merged.totalFrames = Number.isInteger(merged.totalFrames) ? Math.max(1, Math.min(MAX_TOTAL_FRAMES, merged.totalFrames)) : DEFAULT_CONFIGURATION.totalFrames;
