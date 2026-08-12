@@ -50,13 +50,13 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["detail"],
+              "required": ["path", "line", "detail"],
               "properties": {
                 "path": {
-                  "type": "string"
+                  "type": ["string", "null"]
                 },
                 "line": {
-                  "type": "integer",
+                  "type": ["integer", "null"],
                   "minimum": 1
                 },
                 "detail": {
