@@ -1,0 +1,188 @@
+name: Codex issue assistant
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: codex-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Check for a trusted /codex command
+    if: github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+    outputs:
+      run_codex: ${{ steps.command.outputs.run_codex }}
+      request: ${{ steps.command.outputs.request }}
+    steps:
+      - name: Parse issue comment
+        id: command
+        uses: actions/github-script@v7
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          COMMENT_USER_TYPE: ${{ github.event.comment.user.type }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = (process.env.COMMENT_BODY || '').trim();
+            const command = body.match(/^\/codex(?:\s+([\s\S]*))?$/i);
+            const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            const trustedAuthor = trustedAssociations.has(process.env.COMMENT_AUTHOR_ASSOCIATION);
+            const humanAuthor = process.env.COMMENT_USER_TYPE !== 'Bot';
+            const shouldRun = Boolean(command && trustedAuthor && humanAuthor);
+
+            core.setOutput('run_codex', String(shouldRun));
+            core.setOutput('request', shouldRun ? (command[1] || '').trim() : '');
+
+            if (!shouldRun) {
+              core.info('The comment is not a trusted /codex command; skipping Codex.');
+            }
+
+  analyze:
+    name: Answer the issue with Codex
+    needs: gate
+    if: needs.gate.outputs.run_codex == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build the issue context prompt
+        env:
+          CODEX_REQUEST: ${{ needs.gate.outputs.request }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.issue.number;
+            const issue = context.payload.issue || {};
+
+            function clip(value, limit) {
+              const text = String(value || '');
+              if (text.length <= limit) return text;
+              return `${text.slice(0, limit)}\n\n[Content truncated for context size.]`;
+            }
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              },
+            );
+
+            const recentComments = comments.slice(-50);
+            const thread = recentComments.length === 0
+              ? '(No comments were found.)'
+              : recentComments.map((comment) => [
+                  `### @${comment.user?.login || 'unknown'} (${comment.created_at})`,
+                  clip(comment.body, 12000),
+                ].join('\n')).join('\n\n');
+
+            const prompt = [
+              fs.readFileSync('.github/codex/prompts/issue-comment.md', 'utf8').trim(),
+              '',
+              '## Issue context',
+              `Issue: #${issueNumber}`,
+              `Title: ${clip(issue.title, 500)}`,
+              '',
+              '### Issue body',
+              clip(issue.body || '(empty)', 20000),
+              '',
+              '## Recent comment thread',
+              thread,
+              '',
+              '## Current maintainer request',
+              process.env.CODEX_REQUEST || '(No additional request was provided. Summarize the issue and identify the most useful next step.)',
+            ].join('\n');
+
+            fs.mkdirSync('.github/codex/runtime', { recursive: true });
+            fs.writeFileSync('.github/codex/runtime/issue-comment.md', `${prompt}\n`, 'utf8');
+            core.info(`Prepared context from ${recentComments.length} recent issue comment(s).`);
+
+      - name: Run Codex
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/runtime/issue-comment.md
+          output-file: .github/codex/runtime/issue-comment-output.md
+          sandbox: read-only
+          safety-strategy: drop-sudo
+
+  respond:
+    name: Post Codex response
+    needs: analyze
+    if: needs.analyze.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Add the response to the issue
+        uses: actions/github-script@v7
+        env:
+          CODEX_RESPONSE: ${{ needs.analyze.outputs.final_message }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.issue.number;
+            const marker = `<!-- codex-issue-response:${process.env.COMMENT_ID} -->`;
+            const response = (process.env.CODEX_RESPONSE || '').trim();
+
+            if (!response) {
+              throw new Error('Codex returned an empty response.');
+            }
+
+            const existingComments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              },
+            );
+
+            if (existingComments.some((comment) => comment.body?.includes(marker))) {
+              core.info('A response for this comment already exists; skipping a duplicate.');
+              return;
+            }
+
+            const maximumResponseLength = 60000;
+            const boundedResponse = response.length > maximumResponseLength
+              ? `${response.slice(0, maximumResponseLength)}\n\n_[Response truncated to fit the GitHub comment limit.]_`
+              : response;
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              body: [
+                marker,
+                '### Codex response',
+                '',
+                boundedResponse,
+              ].join('\n'),
+            });
+
+            core.notice(`Posted the Codex response to issue #${issueNumber}.`);
