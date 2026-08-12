@@ -44,6 +44,19 @@ The publishing job creates the required labels if they do not already exist:
 
 The workflow does not modify repository files, create branches, or open pull requests.
 
+## Issue comments
+
+The `Codex issue assistant` workflow listens for newly created comments on issues. A trusted repository maintainer can invoke it with:
+
+```text
+/codex
+What is the smallest safe fix for this issue?
+```
+
+The command must start the comment. Comments from bots, external contributors, pull requests, and untrusted accounts are ignored. The workflow reads the issue and its recent comment thread, runs Codex with read-only repository access, and posts the answer back to the issue.
+
+Responses are deduplicated by the triggering comment ID. The workflow uses one concurrency group per issue, so only one response for a given issue runs at a time while different issues can be handled independently. To avoid replacing a pending command, wait for the current `/codex` response before posting another command on the same issue.
+
 ## Schedule and testing
 
 The scheduled run is configured for 08:17 in `America/Montevideo`. Scheduled workflows use the latest commit on the default branch, so the workflow must be merged before the daily schedule can run.
