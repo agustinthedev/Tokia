@@ -273,20 +273,53 @@ export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath
   const listPath = `${options.outputPath}.concat.txt`;
   const clipPaths = scenes.map((_, index) => `${options.outputPath}.scene-${String(index + 1).padStart(2, '0')}.mp4`);
   const ffprobePath = options.ffprobePath ?? defaultFfprobePath(options.ffmpegPath);
+  const configuredTransitionDuration = Number(options.configuration.video.transitionDuration);
+  const transitionDuration = options.configuration.video.transition === 'fade' && scenes.length > 1 && Number.isFinite(configuredTransitionDuration) && configuredTransitionDuration > 0
+    ? Math.min(configuredTransitionDuration, ...scenes.map((scene) => Math.max(0, sceneDuration(scene, options.configuration) - 0.1)))
+    : 0;
   try {
     for (let index = 0; index < scenes.length; index += 1) {
       const scene = scenes[index]!;
       const hasAudio = scene.mediaType === 'video' && scene.muted !== true ? await hasAudioTrack(ffprobePath, scene.path) : false;
       await renderSceneClip({ ffmpegPath: options.ffmpegPath, scene, outputPath: clipPaths[index]!, configuration: options.configuration, width, height, hasAudio });
     }
-    const lines = clipPaths.map((clipPath) => `file '${clipPath.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`);
-    await fsp.writeFile(listPath, lines.join('\n'), 'utf8');
-    await runFfmpeg(options.ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', options.outputPath]);
+    if (transitionDuration > 0) {
+      const filters: string[] = [];
+      let videoInput = '[0:v]';
+      let audioInput = '[0:a]';
+      let elapsed = sceneDuration(scenes[0]!, options.configuration);
+      for (let index = 1; index < scenes.length; index += 1) {
+        const videoOutput = `v${index}`;
+        const audioOutput = `a${index}`;
+        const offset = elapsed - transitionDuration * index;
+        filters.push(`${videoInput}[${index}:v]xfade=transition=fade:duration=${transitionDuration}:offset=${offset}[${videoOutput}]`);
+        filters.push(`${audioInput}[${index}:a]acrossfade=d=${transitionDuration}:c1=tri:c2=tri[${audioOutput}]`);
+        videoInput = `[${videoOutput}]`;
+        audioInput = `[${audioOutput}]`;
+        elapsed += sceneDuration(scenes[index]!, options.configuration);
+      }
+      await runFfmpeg(options.ffmpegPath, [
+        '-y',
+        ...clipPaths.flatMap((clipPath) => ['-i', clipPath]),
+        '-filter_complex', filters.join(';'),
+        '-map', videoInput,
+        '-map', audioInput,
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-movflags', '+faststart',
+        options.outputPath,
+      ]);
+    } else {
+      const lines = clipPaths.map((clipPath) => `file '${clipPath.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`);
+      await fsp.writeFile(listPath, lines.join('\n'), 'utf8');
+      await runFfmpeg(options.ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', options.outputPath]);
+    }
   } finally {
     await fsp.rm(listPath, { force: true });
     await Promise.all(clipPaths.map((clipPath) => fsp.rm(clipPath, { force: true })));
   }
-  return { width, height, durationMs: Math.round(scenes.reduce((total, scene) => total + sceneDuration(scene, options.configuration), 0) * 1000) };
+  return { width, height, durationMs: Math.round((scenes.reduce((total, scene) => total + sceneDuration(scene, options.configuration), 0) - transitionDuration * (scenes.length - 1)) * 1000) };
 }
 
 export async function sha256File(filePath: string): Promise<string> {
