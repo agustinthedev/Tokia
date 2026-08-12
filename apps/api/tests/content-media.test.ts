@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { renderSlideshow, SLIDESHOW_VIDEO_ENCODING, textOverlayLayout } from '../src/content-media.js';
+import { filterFor, renderSlideshow, shouldUpscale, SLIDESHOW_VIDEO_ENCODING, SLIDESHOW_VIDEO_ENCODINGS, textOverlayLayout } from '../src/content-media.js';
 import { mergeConfiguration, ratioDimensions } from '../src/content-model.js';
 
 const execFileAsync = promisify(execFile);
@@ -137,12 +137,22 @@ describe('video slideshow output quality', () => {
       codec: 'libx264',
       preset: 'slow',
       profile: 'high',
-      bitrate: '10M',
+      crf: 18,
       maxRate: '12M',
       bufferSize: '24M',
       pixelFormat: 'yuv420p',
       audioBitrate: '192k'
     });
+    expect(SLIDESHOW_VIDEO_ENCODINGS.balanced.crf).toBeGreaterThan(SLIDESHOW_VIDEO_ENCODINGS.high.crf);
+    expect(SLIDESHOW_VIDEO_ENCODINGS.maximum.crf).toBeLessThan(SLIDESHOW_VIDEO_ENCODINGS.high.crf);
+  });
+
+  it('sharpens only when the source is smaller than the output canvas', () => {
+    const configuration = mergeConfiguration({ textMode: 'none', aspectRatio: '16:9', video: { outputResolution: '1080p' } });
+    expect(shouldUpscale({ width: 640, height: 360 }, { width: 1920, height: 1080 })).toBe(true);
+    expect(shouldUpscale({ width: 3840, height: 2160 }, { width: 1920, height: 1080 })).toBe(false);
+    expect(filterFor(configuration, 1920, 1080, { width: 640, height: 360 })).toContain('unsharp=');
+    expect(filterFor(configuration, 1920, 1080, { width: 3840, height: 2160 })).not.toContain('unsharp=');
   });
 
   it('renders a 1080p landscape slideshow at full HD dimensions', async () => {

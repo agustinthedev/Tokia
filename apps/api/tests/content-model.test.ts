@@ -4,7 +4,12 @@ import { generateNarrative, validateNarrative } from '../src/narrative.js';
 
 describe('content model and narrative contract', () => {
   it('defaults slideshow transitions to none', () => {
-    expect(mergeConfiguration({}).video.transition).toBe('none');
+    expect(mergeConfiguration({}).video).toMatchObject({ transition: 'none', qualityMode: 'high' });
+  });
+
+  it('normalizes variable video quality modes', () => {
+    expect(mergeConfiguration({ video: { qualityMode: 'maximum' } }).video.qualityMode).toBe('maximum');
+    expect(mergeConfiguration({ video: { qualityMode: 'unknown' } }).video.qualityMode).toBe('high');
   });
 
   it('counts cover and CTA inside the requested total', () => {
