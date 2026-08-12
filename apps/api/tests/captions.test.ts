@@ -90,6 +90,24 @@ describe("captions library", () => {
     });
     expect(invalidFolder.statusCode).toBe(400);
 
+    const oversizedFolderTitle = await app!.inject({
+      method: "POST",
+      url: "/api/caption-folders",
+      headers,
+      payload: { title: "x".repeat(121) },
+    });
+    expect(oversizedFolderTitle.statusCode).toBe(400);
+    expect(oversizedFolderTitle.json().error.code).toBe("CAPTION_FOLDER_TITLE_TOO_LONG");
+
+    const oversizedFolderSubtitle = await app!.inject({
+      method: "POST",
+      url: "/api/caption-folders",
+      headers,
+      payload: { title: "Valid title", subtitle: "x".repeat(241) },
+    });
+    expect(oversizedFolderSubtitle.statusCode).toBe(400);
+    expect(oversizedFolderSubtitle.json().error.code).toBe("CAPTION_FOLDER_SUBTITLE_TOO_LONG");
+
     const invalidCaption = await app!.inject({
       method: "POST",
       url: `/api/caption-folders/${folder.id}/captions`,
