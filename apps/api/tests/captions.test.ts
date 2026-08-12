@@ -126,7 +126,7 @@ describe("captions library", () => {
     expect(generated.json().error.code).toBe("AI_UNAVAILABLE");
   });
 
-  it("generates a validated draft using at most 100 folder examples", async () => {
+  it("generates a validated draft using at most 30 folder examples", async () => {
     await setup();
     const folder = await createFolder();
     for (let index = 1; index <= 101; index += 1) {
@@ -170,12 +170,12 @@ describe("captions library", () => {
     expect(generated.statusCode).toBe(200);
     expect(generated.json()).toMatchObject({
       caption: "Generated first line\nGenerated second line",
-      examplesUsed: 100,
+      examplesUsed: 30,
     });
 
     const body = JSON.parse(requestBody) as { messages: Array<{ content: string }> };
     expect(body.messages[1].content).toContain("Write a warm launch caption");
-    expect((body.messages[1].content.match(/--- Example/g) ?? []).length).toBe(100);
+    expect((body.messages[1].content.match(/--- Example/g) ?? []).length).toBe(30);
     expect(body.messages[1].content).not.toContain("Example caption 1\n");
   });
 });
