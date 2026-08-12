@@ -153,6 +153,7 @@ describe('video slideshow output quality', () => {
     expect(shouldUpscale({ width: 3840, height: 2160 }, { width: 1920, height: 1080 })).toBe(false);
     expect(filterFor(configuration, 1920, 1080, { width: 640, height: 360 })).toContain('unsharp=');
     expect(filterFor(configuration, 1920, 1080, { width: 3840, height: 2160 })).not.toContain('unsharp=');
+    expect(filterFor(configuration, 1920, 1080, { width: 3840, height: 2160 })).toContain('setsar=1');
   });
 
   it('renders a 1080p landscape slideshow at full HD dimensions', async () => {
@@ -184,6 +185,47 @@ describe('video slideshow output quality', () => {
         width: 1920,
         height: 1080,
         pix_fmt: 'yuv420p'
+      });
+    } finally {
+      await fsp.rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('normalizes mixed still and trimmed video scenes with different sample aspect ratios', async () => {
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'tokia-slideshow-mixed-streams-'));
+    try {
+      const imagePath = path.join(directory, 'image.png');
+      const videoPath = path.join(directory, 'video.mp4');
+      const outputPath = path.join(directory, 'output.mp4');
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=green:s=64x64', '-frames:v', '1', imagePath]);
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'testsrc=size=320x568:rate=30', '-t', '6', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', videoPath]);
+      const result = await renderSlideshow({
+        ffmpegPath: 'ffmpeg',
+        ffprobePath: 'ffprobe',
+        scenes: [
+          { path: imagePath, mediaType: 'image', durationSeconds: 0.3 },
+          { path: videoPath, mediaType: 'video', durationSeconds: 4.77, startSeconds: 0.62, endSeconds: 5.39, muted: true }
+        ],
+        outputPath,
+        configuration: mergeConfiguration({
+          aspectRatio: '9:16',
+          textMode: 'none',
+          video: { outputResolution: '720p', qualityMode: 'balanced', fps: 30, secondsPerImage: 0.3, transition: 'none' }
+        })
+      });
+      expect(result.durationMs).toBe(5_070);
+      const probe = JSON.parse((await execFileAsync('ffprobe', [
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height,pix_fmt,sample_aspect_ratio',
+        '-of', 'json',
+        outputPath
+      ])).stdout) as { streams?: Array<Record<string, unknown>> };
+      expect(probe.streams?.[0]).toMatchObject({
+        width: 720,
+        height: 1280,
+        pix_fmt: 'yuv420p',
+        sample_aspect_ratio: '1:1'
       });
     } finally {
       await fsp.rm(directory, { recursive: true, force: true });

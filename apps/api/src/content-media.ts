@@ -171,7 +171,8 @@ export function filterFor(configuration: ContentConfiguration, width: number, he
   const resize = crop === 'fit' || crop === 'pad'
     ? `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`
     : `scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,crop=${width}:${height}`;
-  return shouldUpscale(source, { width, height }) ? `${resize},unsharp=5:5:0.35:5:5:0` : resize;
+  const resized = shouldUpscale(source, { width, height }) ? `${resize},unsharp=5:5:0.35:5:5:0` : resize;
+  return `${resized},setsar=1`;
 }
 
 export interface TextOverlay {
@@ -364,7 +365,7 @@ export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath
       }
       const videoLabel = `scene-v${index}`;
       const audioLabel = `scene-a${index}`;
-      const videoFilter = `${filterFor(options.configuration, width, height, sourceDimensions)}${textFilters.length ? `,${textFilters.join(',')}` : ''},format=yuv420p,fps=${fps},trim=duration=${duration},setpts=PTS-STARTPTS`;
+      const videoFilter = `${filterFor(options.configuration, width, height, sourceDimensions)}${textFilters.length ? `,${textFilters.join(',')}` : ''},format=yuv420p,fps=${fps},settb=AVTB,trim=duration=${duration},setpts=PTS-STARTPTS`;
       filters.push(`[${videoInputIndex}:v:0]${videoFilter}[${videoLabel}]`);
       filters.push(`[${audioInputIndex}:a:0]atrim=duration=${duration},asetpts=PTS-STARTPTS,aresample=48000,apad,atrim=duration=${duration}[${audioLabel}]`);
       videoLabels.push(`[${videoLabel}]`);
