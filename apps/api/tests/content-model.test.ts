@@ -3,6 +3,10 @@ import { contentFrameCount, defaultFrameDuration, effectiveFrameTrim, frameDurat
 import { generateNarrative, validateNarrative } from '../src/narrative.js';
 
 describe('content model and narrative contract', () => {
+  it('defaults slideshow transitions to none', () => {
+    expect(mergeConfiguration({}).video.transition).toBe('none');
+  });
+
   it('counts cover and CTA inside the requested total', () => {
     const configuration = mergeConfiguration({ totalFrames: 5, includeCover: true, includeCta: true });
     expect(frameRoles('carousel', configuration).map((frame) => frame.role)).toEqual(['cover', 'content', 'content', 'content', 'cta']);

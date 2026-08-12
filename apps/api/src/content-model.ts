@@ -92,7 +92,7 @@ export const DEFAULT_CONFIGURATION: ContentConfiguration = {
     outputResolution: '720p',
     fps: 30,
     secondsPerImage: 2.5,
-    transition: 'fade',
+    transition: 'none',
     transitionDuration: 0.35,
     panZoom: false,
     intro: false,
