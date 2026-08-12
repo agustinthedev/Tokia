@@ -28,7 +28,7 @@ Return only a single JSON object matching `.github/codex/schemas/issue-implement
 
 - `implementation_summary`: concise description of the implemented change;
 - `commits`: ordered groups with `message`, `files`, `expected_failure`, and `failure_reason`; use an empty `failure_reason` unless `expected_failure` is true, then explain why the test-first commit is expected to fail;
-- `checks`: each check with `name`, `status` (`passed`, `failed`, `blocked`, or `not_run`), and optional `details`;
+- `checks`: each check with `name`, `status` (`passed`, `failed`, `blocked`, or `not_run`), and `details`; use an empty `details` string when there is nothing else to report;
 - `limitations`: remaining limitations or follow-up items.
 
 Every intentional changed file must appear in exactly one commit group. If no safe implementation was possible, leave the working tree unchanged, return an empty `commits` array, and explain the reason in `limitations`.
