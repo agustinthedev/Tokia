@@ -65,6 +65,8 @@ The `Codex issue implementation` workflow starts when a maintainer adds `status:
 
 Codex must create a focused implementation plan, run the relevant checks, and leave no unrelated changes. Because the Codex sandbox keeps `.git` metadata read-only, the host runner creates the conventional commits outside the sandbox, separating test files from implementation files when both are present. The workflow pushes the branch and opens a pull request against `master` only when implementation commits exist. Implementations run one at a time across issues, and GitHub keeps at most one pending run per concurrency group. Accept issues sequentially: if a third issue is accepted before the active and pending work finish, GitHub may replace the older pending run. This workflow intentionally does not provide a durable queue.
 
+If implementation produces no commits or fails before a pull request is opened, an open issue is returned to `status:proposed` and receives a diagnostic comment. Closed issues keep their current labels.
+
 ## Schedule and testing
 
 The scheduled run is configured for 08:17 in `America/Montevideo`. Scheduled workflows use the latest commit on the default branch, so the workflow must be merged before the daily schedule can run.
