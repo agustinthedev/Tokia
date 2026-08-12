@@ -35,7 +35,6 @@ jobs:
         uses: actions/github-script@v7
         env:
           FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
-          PRODUCT_REVIEW_INTERVAL_DAYS: '1'
           WORKFLOW_FILE: .github/workflows/codex-daily-discovery.yml
         with:
           github-token: ${{ github.token }}
@@ -46,7 +45,6 @@ jobs:
             const since = new Date(now - 24 * 60 * 60 * 1000);
             const reasons = [];
             const forceRun = process.env.FORCE_RUN === 'true';
-            const productReviewIntervalDays = Number(process.env.PRODUCT_REVIEW_INTERVAL_DAYS || '1');
 
             const recentCommits = await github.paginate(
               github.rest.repos.listCommits,
@@ -144,8 +142,20 @@ jobs:
               .filter((run) => run.id !== context.runId && run.conclusion === 'success')
               .sort((left, right) => new Date(right.updated_at) - new Date(left.updated_at))[0];
 
+            function calendarDate(value) {
+              const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'America/Montevideo',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+              }).formatToParts(new Date(value));
+
+              const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+              return `${values.year}-${values.month}-${values.day}`;
+            }
+
             const productDue = !previousSuccessfulRun ||
-              now - new Date(previousSuccessfulRun.updated_at).getTime() >= productReviewIntervalDays * 24 * 60 * 60 * 1000;
+              calendarDate(now) !== calendarDate(previousSuccessfulRun.created_at);
 
             if (productDue) {
               reasons.push('the daily small product-improvement review is due');
