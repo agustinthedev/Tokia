@@ -203,6 +203,8 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5.6-terra
+          effort: medium
           prompt-file: .github/codex/runtime/issue-implementation.md
           output-file: .github/codex/runtime/issue-implementation-output.json
           codex-args: >-
