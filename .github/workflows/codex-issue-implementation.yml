@@ -479,7 +479,7 @@ jobs:
   notify_failure:
     name: Report implementation failure
     needs: implement
-    if: needs.implement.result == 'failure'
+    if: ${{ always() && needs.implement.result == 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -493,6 +493,34 @@ jobs:
             const repo = context.repo.repo;
             const issueNumber = context.issue.number;
             const marker = `<!-- codex-implementation-failure:${context.runId} -->`;
+            const currentIssue = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: issueNumber,
+            });
+            const isOpen = currentIssue.data.state === 'open';
+
+            if (isOpen) {
+              const currentLabels = currentIssue.data.labels
+                .map((label) => typeof label === 'string' ? label : label.name)
+                .filter(Boolean);
+              const implementationStatuses = new Set([
+                'status:proposed',
+                'status:in-development',
+              ]);
+
+              if (currentLabels.includes('status:in-development')) {
+                const nextLabels = currentLabels.filter((label) => !implementationStatuses.has(label));
+                nextLabels.push('status:proposed');
+
+                await github.rest.issues.setLabels({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  labels: nextLabels,
+                });
+              }
+            }
 
             await github.rest.issues.createComment({
               owner,
@@ -501,5 +529,8 @@ jobs:
               body: [
                 marker,
                 `Codex could not complete the implementation workflow. Review the [workflow run](https://github.com/${owner}/${repo}/actions/runs/${context.runId}) before retrying.`,
+                isOpen
+                  ? 'The issue was returned to `status:proposed`.'
+                  : 'The issue is already closed, so its labels were left unchanged.',
               ].join('\n'),
             });
