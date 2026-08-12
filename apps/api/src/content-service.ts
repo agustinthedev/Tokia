@@ -4,7 +4,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { pinterestImageCandidates } from '@tokia/shared';
-import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameDuration, effectiveFrameTrim, frameRoles, isMotionMedia, mergeConfiguration, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
+import { ContentValidationError, DEFAULT_CONFIGURATION, assertContentType, defaultFrameDuration, effectiveFrameDuration, effectiveFrameTrim, frameRoles, isMotionMedia, mergeConfiguration, ratioDimensions, slugify, type ContentConfiguration, type ContentType } from './content-model.js';
 import { contentDirectory, createThumbnail, downloadSource, MediaProcessingError, normalizeImage, renderSlideshow, sha256File, type SlideshowScene } from './content-media.js';
 import { convertHeicToJpeg, isHeicImageUrl } from './image-conversion.js';
 import { generateNarrative, validateNarrative, type Narrative } from './narrative.js';
@@ -225,7 +225,8 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
       : null;
     const sourcePath = motionUrl ? path.join(directory, `motion-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.media`) : null;
     if (sourcePath && !fs.existsSync(sourcePath)) await downloadSource(sourceUrl, sourcePath);
-    const normalizedPath = path.join(directory, `source-${String(index + 1).padStart(2, '0')}-${sourceKey}-${sourceCacheKey(sourceUrl)}.png`);
+    const normalizationKey = sourceCacheKey(`${sourceUrl}|${configuration.aspectRatio}|${configuration.video.outputResolution}|${configuration.visual.cropMode}`);
+    const normalizedPath = path.join(directory, `source-${String(index + 1).padStart(2, '0')}-${sourceKey}-${normalizationKey}.png`);
     if (!fs.existsSync(normalizedPath)) {
       const downloadPath = path.join(directory, `download-${String(index + 1).padStart(2, '0')}`);
       if (sourcePath) await fsp.copyFile(sourcePath, downloadPath);
@@ -264,7 +265,9 @@ async function renderContent(db: Database.Database, contentId: string, variant: 
   return { variant, frameCount: frames.length, files: renderedPaths.length };
 }
 
-function ratioFor(configuration: ContentConfiguration): { width: number; height: number } { const { width, height } = configuration.video.outputResolution === '1080p' ? { width: 608, height: 1080 } : { width: 405, height: 720 }; if (configuration.aspectRatio === '1:1') return { width: 720, height: 720 }; if (configuration.aspectRatio === '4:5') return { width: 576, height: 720 }; if (configuration.aspectRatio === '16:9') return { width: 720, height: 405 }; return { width, height }; }
+function ratioFor(configuration: ContentConfiguration): { width: number; height: number } {
+  return ratioDimensions(configuration.aspectRatio, configuration.video.outputResolution);
+}
 
 async function runJob(db: Database.Database, job: Row, settings: Settings): Promise<Row> {
   if (job.job_type === 'narrative_generation' || job.job_type === 'caption_regeneration' || job.job_type === 'frame_regeneration') return runNarrativeJob(db, job, settings);

@@ -11,6 +11,31 @@ export class MediaProcessingError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = 'MediaProcessingError'; }
 }
 
+export const SLIDESHOW_VIDEO_ENCODING = Object.freeze({
+  codec: 'libx264',
+  preset: 'slow',
+  profile: 'high',
+  level: '4.2',
+  bitrate: '10M',
+  maxRate: '12M',
+  bufferSize: '24M',
+  pixelFormat: 'yuv420p',
+  audioBitrate: '192k'
+});
+
+function slideshowVideoEncodingArgs(): string[] {
+  return [
+    '-c:v', SLIDESHOW_VIDEO_ENCODING.codec,
+    '-preset', SLIDESHOW_VIDEO_ENCODING.preset,
+    '-profile:v', SLIDESHOW_VIDEO_ENCODING.profile,
+    '-level', SLIDESHOW_VIDEO_ENCODING.level,
+    '-b:v', SLIDESHOW_VIDEO_ENCODING.bitrate,
+    '-maxrate', SLIDESHOW_VIDEO_ENCODING.maxRate,
+    '-bufsize', SLIDESHOW_VIDEO_ENCODING.bufferSize,
+    '-pix_fmt', SLIDESHOW_VIDEO_ENCODING.pixelFormat
+  ];
+}
+
 export function contentDirectory(storageDirectory: string, contentId: string): string {
   if (!/^[a-zA-Z0-9_-]+$/.test(contentId)) throw new MediaProcessingError('INVALID_CONTENT_ID', 'Invalid content identifier.');
   const root = path.resolve(storageDirectory);
@@ -87,8 +112,8 @@ async function hasAudioTrack(ffprobePath: string, sourcePath: string): Promise<b
 
 function filterFor(configuration: ContentConfiguration, width: number, height: number): string {
   const crop = configuration.visual.cropMode;
-  if (crop === 'fit' || crop === 'pad') return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
-  return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
+  if (crop === 'fit' || crop === 'pad') return `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
+  return `scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,crop=${width}:${height}`;
 }
 
 export interface TextOverlay {
@@ -242,12 +267,11 @@ async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowSc
       '-map', audioMap,
       '-vf', `${filters.join(',')},format=yuv420p`,
       '-r', String(Math.max(1, Math.min(60, configuration.video.fps))),
-      '-c:v', 'libx264',
-      '-pix_fmt', 'yuv420p',
+      ...slideshowVideoEncodingArgs(),
       '-c:a', 'aac',
       '-ar', '48000',
       '-ac', '2',
-      '-b:a', '128k',
+      '-b:a', SLIDESHOW_VIDEO_ENCODING.audioBitrate,
       '-af', 'apad',
       '-movflags', '+faststart',
       options.outputPath,
@@ -304,9 +328,11 @@ export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath
         '-filter_complex', filters.join(';'),
         '-map', videoInput,
         '-map', audioInput,
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
+        ...slideshowVideoEncodingArgs(),
         '-c:a', 'aac',
+        '-ar', '48000',
+        '-ac', '2',
+        '-b:a', SLIDESHOW_VIDEO_ENCODING.audioBitrate,
         '-movflags', '+faststart',
         options.outputPath,
       ]);
