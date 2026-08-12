@@ -63,7 +63,9 @@ Responses are deduplicated by the triggering comment ID. The workflow uses one c
 
 The `Codex issue implementation` workflow starts when a maintainer adds `status:accepted` to an open issue carrying the `source:codex` label. It changes the issue to `status:in-development`, prepares a branch named `codex/issue-N`, and gives Codex workspace-write access to implement only that issue.
 
-Codex must create focused conventional commits, run the relevant checks, and leave no uncommitted changes. The workflow pushes the branch and opens a pull request against `master` only when implementation commits exist. Implementations run one at a time across issues, and GitHub keeps at most one pending run per concurrency group. Accept issues sequentially: if a third issue is accepted before the active and pending work finish, GitHub may replace the older pending run. This workflow intentionally does not provide a durable queue.
+Codex must create a focused implementation plan, run the relevant checks, and leave no unrelated changes. The final response is structured JSON containing ordered commit groups, exact file lists, conventional commit messages, expected-failure metadata for test-first commits, checks, and limitations. The host runner validates that plan and creates the commits outside the Codex sandbox, preserving independent boundaries such as tests, backend code, frontend behavior, configuration, and documentation. The workflow pushes the branch and opens a pull request against `master` only when implementation commits exist. Implementations run one at a time across issues, and GitHub keeps at most one pending run per concurrency group. Accept issues sequentially: if a third issue is accepted before the active and pending work finish, GitHub may replace the older pending run. This workflow intentionally does not provide a durable queue.
+
+If implementation produces no commits or fails before a pull request is opened, an open issue is returned to `status:proposed` and receives a diagnostic comment. Closed issues keep their current labels.
 
 ## Schedule and testing
 
