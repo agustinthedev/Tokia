@@ -1049,3 +1049,20 @@ h3 { font-size: 16px; font-weight: 600; line-height: 1.3; letter-spacing: -.02em
 .caption-ai-intro { margin: -6px 0 18px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .caption-ai-context { display: flex; align-items: center; gap: 7px; color: var(--muted-2); font-size: 10px; }
 .caption-ai-context .icon { width: 15px; height: 15px; color: var(--primary); }
+
+@media (max-width: 680px) {
+  .caption-folder-actions { width: 100%; justify-content: stretch; }
+  .caption-folder-actions .button { flex: 1; }
+  .caption-floating-create { right: 20px; bottom: 20px; }
+}
+
+@media (max-width: 480px) {
+  .caption-folder-grid,
+  .caption-grid { grid-template-columns: 1fr; }
+  .caption-folder-card { min-height: 98px; padding: 14px; }
+  .caption-folder-icon { width: 46px; height: 46px; }
+  .caption-folder-actions { flex-direction: column; }
+  .caption-folder-actions .button { width: 100%; }
+  .color-field { grid-template-columns: 1fr; gap: 8px; }
+  .color-input-wrap { justify-content: flex-start; }
+}
