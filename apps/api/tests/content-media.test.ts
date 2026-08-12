@@ -99,3 +99,40 @@ describe('video slideshow audio', () => {
     }
   }, 30_000);
 });
+
+describe('video slideshow transitions', () => {
+  it('renders hard cuts for none and blended boundary frames for fade', async () => {
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'tokia-slideshow-transition-'));
+    try {
+      const redPath = path.join(directory, 'red.png');
+      const bluePath = path.join(directory, 'blue.png');
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=red:s=64x64', '-frames:v', '1', redPath]);
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=64x64', '-frames:v', '1', bluePath]);
+      const render = async (transition: 'none' | 'fade'): Promise<string> => {
+        const outputPath = path.join(directory, `${transition}.mp4`);
+        await renderSlideshow({
+          ffmpegPath: 'ffmpeg',
+          ffprobePath: 'ffprobe',
+          imagePaths: [redPath, bluePath],
+          outputPath,
+          configuration: mergeConfiguration({ textMode: 'none', aspectRatio: '1:1', video: { transition, transitionDuration: 0.4, secondsPerImage: 1, fps: 30, outputResolution: '720p' } }),
+        });
+        return outputPath;
+      };
+      const nonePath = await render('none');
+      const fadePath = await render('fade');
+      const pixelAt = async (filePath: string, seconds: number): Promise<[number, number, number]> => {
+        const { stdout } = await execFileAsync('ffmpeg', ['-v', 'error', '-ss', String(seconds), '-i', filePath, '-frames:v', '1', '-vf', 'scale=1:1,format=rgb24', '-f', 'rawvideo', '-'], { encoding: 'buffer' });
+        return [stdout[0]!, stdout[1]!, stdout[2]!];
+      };
+      const hardBoundary = await pixelAt(nonePath, 0.9);
+      const blendedBoundary = await pixelAt(fadePath, 0.8);
+      expect(hardBoundary[0]).toBeGreaterThan(200);
+      expect(hardBoundary[2]).toBeLessThan(50);
+      expect(blendedBoundary[0]).toBeGreaterThan(60);
+      expect(blendedBoundary[2]).toBeGreaterThan(60);
+    } finally {
+      await fsp.rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
