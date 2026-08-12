@@ -53,7 +53,8 @@
         "additionalProperties": false,
         "required": [
           "name",
-          "status"
+          "status",
+          "details"
         ],
         "properties": {
           "name": {
