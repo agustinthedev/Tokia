@@ -27,7 +27,7 @@ con AI a partir de ejemplos existentes.
 8. Dentro de una carpeta debe existir una acción para elegir un caption al azar
    de esa carpeta y abrirlo en el editor.
 9. Dentro de una carpeta debe existir una acción para generar un caption con AI.
-   La generación debe recibir el prompt breve del usuario y hasta 100 captions
+   La generación debe recibir el prompt breve del usuario y hasta 30 captions
    de la carpeta como ejemplos de contexto.
 10. El caption generado debe abrirse en el editor de creación como un borrador;
     no se debe persistir hasta que el usuario lo confirme.
@@ -45,7 +45,7 @@ con AI a partir de ejemplos existentes.
   confiar sólo en la validación del navegador.
 - Usar la asignación AI existente de `TOPIC_DETECTION` únicamente cuando el
   proveedor esté conectado y tenga capacidad de generación de texto.
-- Limitar el contexto de ejemplos a 100 captions y truncar cada ejemplo para
+- Limitar el contexto de ejemplos a 30 captions y truncar cada ejemplo para
   mantener controlado el tamaño de la solicitud al proveedor.
 - No persistir credenciales ni enviar secretos al navegador. Las respuestas AI
   deben normalizarse y validarse antes de entregarse al frontend.
@@ -73,7 +73,7 @@ visible con una vista previa acotada.
   siguen presentes tanto en el editor como en la tarjeta.
 - El selector aleatorio sólo abre captions de la carpeta actual.
 - La generación usa el prompt ingresado, no falla si la carpeta no tiene
-  ejemplos y limita el contexto a 100 ejemplos.
+  ejemplos y limita el contexto a 30 ejemplos.
 - Un resultado AI se puede modificar y descartar sin crear un registro; sólo el
   botón de guardar lo persiste.
 - Sin proveedor conectado, la API informa que AI no está disponible y la UI no
