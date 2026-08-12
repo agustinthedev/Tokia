@@ -481,9 +481,9 @@ function Icon({ name }: { name: string }): ReactElement {
   );
 }
 
-function Button({ children, variant = "secondary", onClick, type = "button", disabled = false, className = "" }: { children: ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger"; onClick?: () => void; type?: "button" | "submit"; disabled?: boolean; className?: string }): ReactElement {
+function Button({ children, variant = "secondary", onClick, type = "button", disabled = false, className = "", title }: { children: ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger"; onClick?: () => void; type?: "button" | "submit"; disabled?: boolean; className?: string; title?: string }): ReactElement {
   return (
-    <button type={type} className={`button button-${variant} ${className}`} onClick={onClick} disabled={disabled}>
+    <button type={type} className={`button button-${variant} ${className}`} onClick={onClick} disabled={disabled} title={title}>
       {children}
     </button>
   );
