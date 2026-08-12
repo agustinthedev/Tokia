@@ -55,7 +55,7 @@ What is the smallest safe fix for this issue?
 
 The command must start the comment. Comments from bots, external contributors, pull requests, and untrusted accounts are ignored. The workflow reads the issue and its recent comment thread, runs Codex with read-only repository access, and posts the answer back to the issue.
 
-Responses are deduplicated by the triggering comment ID. The workflow uses one concurrency group per issue, so only one response for a given issue runs at a time while different issues can be handled independently.
+Responses are deduplicated by the triggering comment ID. The workflow uses one concurrency group per issue, so only one response for a given issue runs at a time while different issues can be handled independently. To avoid replacing a pending command, wait for the current `/codex` response before posting another command on the same issue.
 
 ## Schedule and testing
 
