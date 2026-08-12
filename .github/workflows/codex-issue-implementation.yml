@@ -359,18 +359,65 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issueNumber = context.issue.number;
-
-            await github.rest.issues.createComment({
+            const marker = '<!-- codex-implementation-no-changes -->';
+            const currentIssue = await github.rest.issues.get({
               owner,
               repo,
               issue_number: issueNumber,
-              body: [
-                '<!-- codex-implementation-no-changes -->',
-                'Codex did not create implementation commits for this accepted issue. The issue was left without a pull request; review the workflow logs before trying again.',
-              ].join('\n'),
             });
+            const isOpen = currentIssue.data.state === 'open';
 
-            core.warning(`No implementation commits were created for issue #${issueNumber}.`);
+            if (isOpen) {
+              const currentLabels = currentIssue.data.labels
+                .map((label) => typeof label === 'string' ? label : label.name)
+                .filter(Boolean);
+              const implementationStatuses = new Set([
+                'status:proposed',
+                'status:in-development',
+              ]);
+
+              if (currentLabels.includes('status:in-development')) {
+                const nextLabels = currentLabels.filter((label) => !implementationStatuses.has(label));
+                nextLabels.push('status:proposed');
+
+                await github.rest.issues.setLabels({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  labels: nextLabels,
+                });
+              }
+            }
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              },
+            );
+            const hasExistingReport = comments.some(
+              (comment) => comment.user?.type === 'Bot'
+                && comment.user?.login === 'github-actions[bot]'
+                && comment.body?.includes(marker),
+            );
+
+            if (!hasExistingReport) {
+              const message = isOpen
+                ? 'Codex did not create implementation commits for this accepted issue. The issue was returned to `status:proposed`; review the workflow logs and refine the issue before accepting it again.'
+                : 'Codex did not create implementation commits, and the issue is already closed, so no implementation pull request was created.';
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: [marker, message].join('\n'),
+              });
+            }
+
+            core.warning(`No implementation commits were created for issue #${issueNumber}; issue state: ${currentIssue.data.state}.`);
 
   notify_failure:
     name: Report implementation failure
