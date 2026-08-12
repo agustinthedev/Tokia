@@ -11,7 +11,7 @@ import "./clipping.css";
 import "./saas-theme.css";
 
 type AnyRecord = Record<string, any>;
-type PageKey = "home" | "collections" | "assets" | "projects" | "imports" | "settings";
+type PageKey = "home" | "collections" | "captions" | "assets" | "projects" | "imports" | "settings";
 type SettingsTab =
   | "connection"
   | "advanced"
@@ -95,6 +95,29 @@ interface Collection {
   updatedAt?: string;
   createdAt?: string;
   archivedAt?: string;
+}
+interface CaptionFolder {
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  color: string;
+  captionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+interface Caption {
+  id: string;
+  folderId: string;
+  body: string;
+  preview: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+interface CaptionAiStatus {
+  ready: boolean;
+  providerName?: string | null;
+  message?: string | null;
 }
 interface Project {
   id: string;
@@ -361,11 +384,12 @@ function getRoute(): { page: PageKey; id?: string } {
   const parts = window.location.pathname.split("/").filter(Boolean);
   const rawPage = parts[0] ?? "home";
   if (rawPage === "collection" && parts[1]) return { page: "collections", id: parts[1] };
+  if (rawPage === "captions") return { page: "captions", id: parts[1] };
   if (rawPage === "project" && parts[1]) return { page: "projects", id: parts[1] };
   if (rawPage === "assets" || rawPage === "imports") return { page: "settings" };
   const page = rawPage as PageKey;
   return {
-    page: ["home", "collections", "projects", "settings"].includes(page) ? page : "home",
+    page: ["home", "collections", "captions", "projects", "settings"].includes(page) ? page : "home",
   };
 }
 
@@ -373,6 +397,10 @@ function Icon({ name }: { name: string }): ReactElement {
   const svgIcons: Record<string, ReactNode> = {
     home: <><path d="m3 10 9-7 9 7" /><path d="M5 9.5V21h14V9.5" /><path d="M9 21v-6h6v6" /></>,
     collections: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M4 9h16M9 4v16M15 4v16" /></>,
+    captions: <><path d="M5 4.5h10l4 4V20H5z" /><path d="M15 4.5V9h4M8 12h8M8 15.5h6" /></>,
+    folder: <><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h4l2 2h6A2.5 2.5 0 0 1 20.5 9.5v6A2.5 2.5 0 0 1 18 18H6a2.5 2.5 0 0 1-2.5-2.5z" /></>,
+    shuffle: <><path d="M16 3h5v5M4 7h2.5c3.5 0 4.5 5 8 5H21" /><path d="m18 15 3 3-3 3M4 17h2.5c1.3 0 2.2-.7 2.9-1.7M14.5 8.7C15.2 7.7 16.2 7 17.5 7H21" /></>,
+    sparkles: <><path d="m12 3 1.3 4.7L18 9l-4.7 1.3L12 15l-1.3-4.7L6 9l4.7-1.3z" /><path d="m19 15 .6 2.4L22 18l-2.4.6L19 21l-.6-2.4L16 18l2.4-.6z" /></>,
     assets: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m7 16 3-3 2 2 2-3 3 4" /><circle cx="9" cy="9" r="1" /></>,
     projects: <><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2h5A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" /></>,
     imports: <><path d="M12 3v11" /><path d="m8 10 4 4 4-4" /><path d="M5 20h14" /></>,
@@ -422,6 +450,10 @@ function Icon({ name }: { name: string }): ReactElement {
   const icons: Record<string, string> = {
     home: "⌂",
     collections: "▦",
+    captions: "▤",
+    folder: "▰",
+    shuffle: "↝",
+    sparkles: "✦",
     assets: "◈",
     projects: "◒",
     imports: "↥",
