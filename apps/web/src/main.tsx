@@ -696,6 +696,7 @@ function Shell({ route, children, onSearch }: { route: { page: PageKey; id?: str
   const links: { key: PageKey; label: string; icon: string }[] = [
     { key: "home", label: "Home", icon: "home" },
     { key: "collections", label: "Collections", icon: "collections" },
+    { key: "captions", label: "Captions", icon: "captions" },
     { key: "projects", label: "Projects", icon: "projects" },
   ];
   const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth <= 860);
