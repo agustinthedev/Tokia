@@ -2706,7 +2706,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
       outputResolution: "720p",
       fps: 30,
       secondsPerImage: 2.5,
-      transition: "fade",
+      transition: "none",
       transitionDuration: 0.35,
       panZoom: false,
       intro: false,
@@ -3988,7 +3988,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                 <label className="form-field">
                   <span>Transition</span>
                   <select
-                    value={config.video?.transition ?? "fade"}
+                    value={config.video?.transition ?? "none"}
                     onChange={(event) =>
                       updateConfig("video", {
                         ...config.video,
