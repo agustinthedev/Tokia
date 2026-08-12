@@ -208,6 +208,7 @@ describe('video slideshow output quality', () => {
       });
       expect(result.durationMs).toBe(20_000);
       expect((await fsp.stat(outputPath)).size).toBeGreaterThan(0);
+      await expect(fsp.access(`${outputPath}.filtergraph`)).rejects.toThrow();
     } finally {
       await fsp.rm(directory, { recursive: true, force: true });
     }
