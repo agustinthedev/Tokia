@@ -4,21 +4,43 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { renderSlideshow, textOverlayLayout } from '../src/content-media.js';
-import { mergeConfiguration } from '../src/content-model.js';
+import { renderSlideshow, SLIDESHOW_VIDEO_ENCODING, textOverlayLayout } from '../src/content-media.js';
+import { mergeConfiguration, ratioDimensions } from '../src/content-model.js';
 
 const execFileAsync = promisify(execFile);
 
 describe('content text overlays', () => {
   it('renders headline and body as distinct typographic layers', () => {
     const configuration = mergeConfiguration({ textMode: 'headline_and_body' });
-    const parts = textOverlayLayout(configuration, 405, 720, { headline: 'Life lately', body: 'I like it' });
+    const reference = ratioDimensions('9:16', '720p');
+    const parts = textOverlayLayout(configuration, reference.width, reference.height, { headline: 'Life lately', body: 'I like it' });
 
     expect(parts).toHaveLength(2);
     expect(parts[0]).toMatchObject({ key: 'headline', text: 'Life lately', fontSize: 54 });
     expect(parts[1]).toMatchObject({ key: 'body', text: 'I like it', fontSize: 31 });
     expect(parts[1]!.fontSize).toBeLessThan(parts[0]!.fontSize);
     expect(parts[1]!.y).toContain('+');
+  });
+
+  it('scales text metrics from the 720p design canvas for 1080p output', () => {
+    const configuration = mergeConfiguration({ textMode: 'headline_and_body' });
+    const reference = ratioDimensions('9:16', '720p');
+    const hd = ratioDimensions('9:16', '1080p');
+    const referenceParts = textOverlayLayout(configuration, reference.width, reference.height, { headline: 'Life lately', body: 'I like it' });
+    const hdParts = textOverlayLayout(configuration, hd.width, hd.height, { headline: 'Life lately', body: 'I like it' });
+
+    expect(hdParts[0]).toMatchObject({
+      fontSize: Math.round(referenceParts[0]!.fontSize * 1.5),
+      lineSpacing: Math.round(referenceParts[0]!.lineSpacing * 1.5),
+      boxBorderWidth: Math.round(referenceParts[0]!.boxBorderWidth * 1.5),
+      x: '90',
+    });
+    expect(hdParts[1]).toMatchObject({
+      fontSize: Math.round(referenceParts[1]!.fontSize * 1.5),
+      boxBorderWidth: Math.round(referenceParts[1]!.boxBorderWidth * 1.5),
+      x: '90',
+    });
+    expect(hdParts[0]!.y).toContain('-135');
   });
 
   it('wraps long copy without introducing a replacement glyph between fields', () => {
@@ -94,6 +116,65 @@ describe('video slideshow audio', () => {
       };
       expect(await volume(unmutedPath)).toBeGreaterThan(-40);
       expect(await volume(mutedPath)).toBeLessThan(-80);
+    } finally {
+      await fsp.rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+describe('video slideshow output quality', () => {
+  it('maps resolution settings to standard canvas dimensions', () => {
+    expect(ratioDimensions('16:9', '1080p')).toEqual({ width: 1920, height: 1080 });
+    expect(ratioDimensions('16:9', '720p')).toEqual({ width: 1280, height: 720 });
+    expect(ratioDimensions('9:16', '1080p')).toEqual({ width: 1080, height: 1920 });
+    expect(ratioDimensions('9:16', '720p')).toEqual({ width: 720, height: 1280 });
+    expect(ratioDimensions('4:5', '1080p')).toEqual({ width: 864, height: 1080 });
+    expect(ratioDimensions('1:1', '1080p')).toEqual({ width: 1080, height: 1080 });
+  });
+
+  it('uses an explicit high-quality H.264 encoding contract', () => {
+    expect(SLIDESHOW_VIDEO_ENCODING).toMatchObject({
+      codec: 'libx264',
+      preset: 'slow',
+      profile: 'high',
+      bitrate: '10M',
+      maxRate: '12M',
+      bufferSize: '24M',
+      pixelFormat: 'yuv420p',
+      audioBitrate: '192k'
+    });
+  });
+
+  it('renders a 1080p landscape slideshow at full HD dimensions', async () => {
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'tokia-slideshow-quality-'));
+    try {
+      const imagePath = path.join(directory, 'image.png');
+      const outputPath = path.join(directory, 'output.mp4');
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=green:s=64x64', '-frames:v', '1', imagePath]);
+      await renderSlideshow({
+        ffmpegPath: 'ffmpeg',
+        ffprobePath: 'ffprobe',
+        imagePaths: [imagePath],
+        outputPath,
+        configuration: mergeConfiguration({
+          aspectRatio: '16:9',
+          textMode: 'none',
+          video: { outputResolution: '1080p', fps: 24, secondsPerImage: 0.5, transition: 'none' }
+        })
+      });
+      const probe = JSON.parse((await execFileAsync('ffprobe', [
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name,width,height,pix_fmt',
+        '-of', 'json',
+        outputPath
+      ])).stdout) as { streams?: Array<Record<string, unknown>> };
+      expect(probe.streams?.[0]).toMatchObject({
+        codec_name: 'h264',
+        width: 1920,
+        height: 1080,
+        pix_fmt: 'yuv420p'
+      });
     } finally {
       await fsp.rm(directory, { recursive: true, force: true });
     }

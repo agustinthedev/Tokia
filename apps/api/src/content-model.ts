@@ -226,6 +226,6 @@ export function ratioDimensions(aspectRatio: ContentConfiguration['aspectRatio']
   const base = resolution === '1080p' ? 1080 : 720;
   if (aspectRatio === '1:1') return { width: base, height: base };
   if (aspectRatio === '4:5') return { width: Math.round(base * 0.8), height: base };
-  if (aspectRatio === '16:9') return { width: base, height: Math.round(base * 9 / 16) };
-  return { width: Math.round(base * 9 / 16), height: base };
+  if (aspectRatio === '16:9') return { width: Math.round(base * 16 / 9), height: base };
+  return { width: base, height: Math.round(base * 16 / 9) };
 }

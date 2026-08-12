@@ -104,7 +104,7 @@ From a project, **Create content** provides the following content types:
 
 The content wizard collects the content title at the beginning, then walks through source selection, structure, content, visuals, text, and preview. For video slideshows, image duration can be set globally before content selection, applied in bulk only to unlocked image scenes, and adjusted per scene afterward. Video scenes expose a two-handle range over the original source so each scene can keep any valid section of its video.
 
-Preview generation is local and must complete before the final confirmation step. Generated media is stored under the configured content storage directory; originals are left untouched.
+Preview generation is local and must complete before the final confirmation step. Generated media is stored under the configured content storage directory; originals are left untouched. Video slideshow exports use true 720p/1080p dimensions for the selected aspect ratio and high-quality H.264/AAC encoding; Pinterest image sources use the largest/original CDN variant when available.
 
 ## Runtime configuration and local data
 

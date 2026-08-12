@@ -11,6 +11,31 @@ export class MediaProcessingError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = 'MediaProcessingError'; }
 }
 
+export const SLIDESHOW_VIDEO_ENCODING = Object.freeze({
+  codec: 'libx264',
+  preset: 'slow',
+  profile: 'high',
+  level: '4.2',
+  bitrate: '10M',
+  maxRate: '12M',
+  bufferSize: '24M',
+  pixelFormat: 'yuv420p',
+  audioBitrate: '192k'
+});
+
+function slideshowVideoEncodingArgs(): string[] {
+  return [
+    '-c:v', SLIDESHOW_VIDEO_ENCODING.codec,
+    '-preset', SLIDESHOW_VIDEO_ENCODING.preset,
+    '-profile:v', SLIDESHOW_VIDEO_ENCODING.profile,
+    '-level', SLIDESHOW_VIDEO_ENCODING.level,
+    '-b:v', SLIDESHOW_VIDEO_ENCODING.bitrate,
+    '-maxrate', SLIDESHOW_VIDEO_ENCODING.maxRate,
+    '-bufsize', SLIDESHOW_VIDEO_ENCODING.bufferSize,
+    '-pix_fmt', SLIDESHOW_VIDEO_ENCODING.pixelFormat
+  ];
+}
+
 export function contentDirectory(storageDirectory: string, contentId: string): string {
   if (!/^[a-zA-Z0-9_-]+$/.test(contentId)) throw new MediaProcessingError('INVALID_CONTENT_ID', 'Invalid content identifier.');
   const root = path.resolve(storageDirectory);
@@ -87,8 +112,8 @@ async function hasAudioTrack(ffprobePath: string, sourcePath: string): Promise<b
 
 function filterFor(configuration: ContentConfiguration, width: number, height: number): string {
   const crop = configuration.visual.cropMode;
-  if (crop === 'fit' || crop === 'pad') return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
-  return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
+  if (crop === 'fit' || crop === 'pad') return `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
+  return `scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos,crop=${width}:${height}`;
 }
 
 export interface TextOverlay {
@@ -144,35 +169,46 @@ function fontFileFor(fontFamily: string, fontWeight: string): string {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
 }
 
-function textX(configuration: ContentConfiguration): string {
-  if (configuration.visual.textAlignment === 'left') return '60';
-  if (configuration.visual.textAlignment === 'right') return 'w-text_w-60';
-  return '(w-text_w)/2';
+function textLayoutScale(configuration: ContentConfiguration, width: number, height: number): number {
+  const reference = ratioDimensions(configuration.aspectRatio, '720p');
+  return Math.min(width / reference.width, height / reference.height);
 }
 
 export function textOverlayLayout(configuration: ContentConfiguration, width: number, height: number, text: TextOverlay): TextOverlayPart[] {
   const headline = text.headline?.trim() ?? '';
   const body = text.body?.trim() ?? '';
   if (!headline && !body) return [];
-  const headlineSize = clamp(Math.round(configuration.visual.fontSize || 54), 28, 120);
-  const bodySize = clamp(Math.round(headlineSize * 0.58), 20, 72);
+  const scale = textLayoutScale(configuration, width, height);
+  const lineSpacing = Math.max(1, Math.round(TEXT_LINE_SPACING * scale));
+  const blockGap = Math.max(1, Math.round(TEXT_BLOCK_GAP * scale));
+  const horizontalMargin = Math.max(1, Math.round(60 * scale));
+  const topMargin = Math.max(1, Math.round(80 * scale));
+  const bottomMargin = Math.max(1, Math.round(90 * scale));
+  const referenceHeadlineSize = clamp(Math.round(configuration.visual.fontSize || 54), 28, 120);
+  const headlineSize = Math.max(1, Math.round(referenceHeadlineSize * scale));
+  const referenceBodySize = clamp(Math.round(referenceHeadlineSize * 0.58), 20, 72);
+  const bodySize = Math.max(1, Math.round(referenceBodySize * scale));
   const headlineText = headline ? wrapOverlayText(headline, clamp(Math.floor(width / (headlineSize * 0.5)), 12, 42)) : '';
   const bodyText = body ? wrapOverlayText(body, clamp(Math.floor(width / (bodySize * 0.5)), 18, 64)) : '';
   const headlineLines = headlineText ? headlineText.split('\n').length : 0;
   const bodyLines = bodyText ? bodyText.split('\n').length : 0;
-  const headlineHeight = headlineLines ? headlineLines * headlineSize + (headlineLines - 1) * TEXT_LINE_SPACING : 0;
-  const bodyHeight = bodyLines ? bodyLines * bodySize + (bodyLines - 1) * TEXT_LINE_SPACING : 0;
-  const blockHeight = headlineHeight + bodyHeight + (headlineText && bodyText ? TEXT_BLOCK_GAP : 0);
+  const headlineHeight = headlineLines ? headlineLines * headlineSize + (headlineLines - 1) * lineSpacing : 0;
+  const bodyHeight = bodyLines ? bodyLines * bodySize + (bodyLines - 1) * lineSpacing : 0;
+  const blockHeight = headlineHeight + bodyHeight + (headlineText && bodyText ? blockGap : 0);
   const top = configuration.visual.textPosition === 'top'
-    ? '80'
+    ? String(topMargin)
     : configuration.visual.textPosition === 'center'
       ? `(h-${blockHeight})/2`
-      : `h-${blockHeight}-90`;
-  const bodyY = headlineText ? `${top}+${headlineHeight + TEXT_BLOCK_GAP}` : top;
-  const x = textX(configuration);
+      : `h-${blockHeight}-${bottomMargin}`;
+  const bodyY = headlineText ? `${top}+${headlineHeight + blockGap}` : top;
+  const x = configuration.visual.textAlignment === 'left'
+    ? String(horizontalMargin)
+    : configuration.visual.textAlignment === 'right'
+      ? `w-text_w-${horizontalMargin}`
+      : '(w-text_w)/2';
   const parts: TextOverlayPart[] = [];
-  if (headlineText) parts.push({ key: 'headline', text: headlineText, fontSize: headlineSize, fontFile: fontFileFor(configuration.visual.fontFamily, configuration.visual.fontWeight), x, y: top, lineSpacing: TEXT_LINE_SPACING, boxBorderWidth: 24 });
-  if (bodyText) parts.push({ key: 'body', text: bodyText, fontSize: bodySize, fontFile: fontFileFor(configuration.visual.fontFamily, '400'), x, y: bodyY, lineSpacing: TEXT_LINE_SPACING, boxBorderWidth: 16 });
+  if (headlineText) parts.push({ key: 'headline', text: headlineText, fontSize: headlineSize, fontFile: fontFileFor(configuration.visual.fontFamily, configuration.visual.fontWeight), x, y: top, lineSpacing, boxBorderWidth: Math.max(1, Math.round(24 * scale)) });
+  if (bodyText) parts.push({ key: 'body', text: bodyText, fontSize: bodySize, fontFile: fontFileFor(configuration.visual.fontFamily, '400'), x, y: bodyY, lineSpacing, boxBorderWidth: Math.max(1, Math.round(16 * scale)) });
   return parts;
 }
 
@@ -242,12 +278,11 @@ async function renderSceneClip(options: { ffmpegPath: string; scene: SlideshowSc
       '-map', audioMap,
       '-vf', `${filters.join(',')},format=yuv420p`,
       '-r', String(Math.max(1, Math.min(60, configuration.video.fps))),
-      '-c:v', 'libx264',
-      '-pix_fmt', 'yuv420p',
+      ...slideshowVideoEncodingArgs(),
       '-c:a', 'aac',
       '-ar', '48000',
       '-ac', '2',
-      '-b:a', '128k',
+      '-b:a', SLIDESHOW_VIDEO_ENCODING.audioBitrate,
       '-af', 'apad',
       '-movflags', '+faststart',
       options.outputPath,
@@ -304,9 +339,11 @@ export async function renderSlideshow(options: { ffmpegPath: string; ffprobePath
         '-filter_complex', filters.join(';'),
         '-map', videoInput,
         '-map', audioInput,
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
+        ...slideshowVideoEncodingArgs(),
         '-c:a', 'aac',
+        '-ar', '48000',
+        '-ac', '2',
+        '-b:a', SLIDESHOW_VIDEO_ENCODING.audioBitrate,
         '-movflags', '+faststart',
         options.outputPath,
       ]);

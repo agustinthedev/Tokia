@@ -26,7 +26,9 @@ The local structured narrative provider is deterministic by default (`modelProvi
 
 ## Media and output storage
 
-The API downloads selected source media, normalizes it with FFmpeg, and stores derived files under the configured content storage directory (`content-{id}`). Original ingested assets are not mutated. PNG frames, WebP thumbnails, MP4 videos, SHA-256 hashes, dimensions, and metadata are persisted in `content_assets`. Carousel ZIP downloads include final slides, `metadata.json`, and `caption.txt`. The API exposes download URLs rather than filesystem paths.
+The API downloads selected source media, normalizes it with FFmpeg, and stores derived files under the configured content storage directory (`content-{id}`). Original ingested assets are not mutated. Pinterest image sources are promoted to the largest available/original CDN variant before downloading, with numeric CDN variants retained as fallbacks. PNG frames, WebP thumbnails, MP4 videos, SHA-256 hashes, dimensions, and metadata are persisted in `content_assets`. Carousel ZIP downloads include final slides, `metadata.json`, and `caption.txt`. The API exposes download URLs rather than filesystem paths.
+
+Video slideshow output uses standard canvas dimensions: 1280×720 or 1920×1080 for 16:9, 720×1280 or 1080×1920 for 9:16, 720×720 or 1080×1080 for 1:1, and 576×720 or 864×1080 for 4:5. MP4 scenes are encoded with H.264 High Profile, the `slow` preset, yuv420p, a 10 Mbps target bitrate capped at 12 Mbps, AAC audio at 192 kbps, and `+faststart`. Preview and final renders use the same output-quality settings. The normalizer cache includes the output configuration so an older lower-resolution normalization is not reused after a resolution or crop change.
 
 Change the FFmpeg executable path from Settings → Advanced when FFmpeg is not available on `PATH`. Node.js 20+ and the existing SQLite dependency are required. No Docker is used.
 
