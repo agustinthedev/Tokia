@@ -16,6 +16,7 @@ jobs:
     outputs:
       run_implementation: ${{ steps.prepare.outputs.run_implementation }}
       branch_name: ${{ steps.prepare.outputs.branch_name }}
+      issue_type: ${{ steps.prepare.outputs.issue_type }}
     steps:
       - name: Validate the issue and update its status
         id: prepare
@@ -35,9 +36,11 @@ jobs:
             });
             const issue = issueResponse.data;
             const labels = issue.labels.map((label) => typeof label === 'string' ? label : label.name);
+            const issueType = labels.find((label) => label?.startsWith('type:'))?.slice('type:'.length) || 'general';
 
             core.setOutput('branch_name', branchName);
             core.setOutput('run_implementation', 'false');
+            core.setOutput('issue_type', issueType);
 
             if (issue.state !== 'open') {
               core.info('The issue is not open; skipping implementation.');
@@ -113,6 +116,7 @@ jobs:
     env:
       BRANCH_NAME: ${{ needs.gate.outputs.branch_name }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_TYPE: ${{ needs.gate.outputs.issue_type }}
     steps:
       - name: Check out the default branch
         uses: actions/checkout@v5
@@ -209,7 +213,7 @@ jobs:
           sandbox: workspace-write
           safety-strategy: drop-sudo
 
-      - name: Validate commits and push the implementation branch
+      - name: Create commits, validate, and push the implementation branch
         id: finalize
         shell: bash
         env:
@@ -226,10 +230,63 @@ jobs:
 
           rm -rf .github/codex/runtime
 
-          if [[ -n "$(git status --porcelain)" ]]; then
-            echo 'Codex left uncommitted changes in the workspace.' >&2
-            git status --short >&2
-            exit 1
+          mapfile -t changed_files < <(
+            {
+              git diff --name-only
+              git diff --cached --name-only
+              git ls-files --others --exclude-standard
+            } | sort -u
+          )
+
+          if ((${#changed_files[@]} > 0)); then
+            for file in "${changed_files[@]}"; do
+              case "${file}" in
+                .env|.env.local|.env.development|.env.production|*.pem|*.key|*.p12|*.pfx)
+                  echo "Refusing to commit sensitive-looking file: ${file}" >&2
+                  exit 1
+                  ;;
+              esac
+            done
+
+            test_files=()
+            implementation_files=()
+            for file in "${changed_files[@]}"; do
+              case "${file}" in
+                *.test.*|*.spec.*|tests/*|*/tests/*)
+                  test_files+=("${file}")
+                  ;;
+                *)
+                  implementation_files+=("${file}")
+                  ;;
+              esac
+            done
+
+            scope="$(printf '%s' "${ISSUE_TYPE:-general}" | tr -c '[:alnum:]-' '-' | sed 's/-*$//')"
+            [[ -n "${scope}" ]] || scope='general'
+            case "${ISSUE_TYPE:-general}" in
+              product) implementation_prefix='feat' ;;
+              tech-debt) implementation_prefix='refactor' ;;
+              bug|security) implementation_prefix='fix' ;;
+              *) implementation_prefix='chore' ;;
+            esac
+
+            if ((${#test_files[@]} > 0)); then
+              git add -- "${test_files[@]}"
+              git diff --cached --check
+              git commit -m "test(${scope}): add coverage for issue #${ISSUE_NUMBER}"
+            fi
+
+            if ((${#implementation_files[@]} > 0)); then
+              git add -- "${implementation_files[@]}"
+              git diff --cached --check
+              git commit -m "${implementation_prefix}(${scope}): implement issue #${ISSUE_NUMBER}"
+            fi
+
+            if [[ -n "$(git status --porcelain)" ]]; then
+              echo 'The runner could not commit every intentional change.' >&2
+              git status --short >&2
+              exit 1
+            fi
           fi
 
           commit_count="$(git rev-list --count origin/master..HEAD)"
