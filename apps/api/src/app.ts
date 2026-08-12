@@ -823,6 +823,7 @@ export async function buildApp(
         { name: "diagnostics" },
         { name: "dashboard" },
         { name: "collections" },
+        { name: "captions" },
         { name: "assets" },
         { name: "projects" },
         { name: "content" },
