@@ -215,7 +215,7 @@ function text(value: unknown, max = 10_000): string | null {
 }
 const CAPTION_BODY_MAX_LENGTH = 20_000;
 const CAPTION_PROMPT_MAX_LENGTH = 1_000;
-const CAPTION_EXAMPLE_LIMIT = 100;
+const CAPTION_EXAMPLE_LIMIT = 30;
 const CAPTION_EXAMPLE_MAX_LENGTH = 2_000;
 const DEFAULT_FOLDER_COLOR = "#2468ec";
 const DEFAULT_CAPTION_COLOR = "#f59e0b";
