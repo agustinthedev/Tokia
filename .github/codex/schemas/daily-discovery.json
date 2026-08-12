@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "type",
+          "priority",
+          "summary",
+          "impact",
+          "evidence",
+          "recommendation",
+          "acceptanceCriteria",
+          "confidence"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          },
+          "type": {
+            "type": "string",
+            "enum": ["bug", "security", "tech-debt", "product"]
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 20
+          },
+          "impact": {
+            "type": "string",
+            "minLength": 20
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["detail"],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "detail": {
+                  "type": "string",
+                  "minLength": 10
+                }
+              }
+            }
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 20
+          },
+          "acceptanceCriteria": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "string",
+              "minLength": 8
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          }
+        }
+      }
+    }
+  }
+}
