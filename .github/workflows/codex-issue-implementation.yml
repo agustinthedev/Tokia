@@ -460,6 +460,12 @@ jobs:
               product: 'feat',
             }[typeLabel] || 'chore';
 
+            const labelsToPropagate = [...new Set(
+              (issue.labels || [])
+                .map((label) => typeof label === 'string' ? label : label.name)
+                .filter((label) => label && !label.startsWith('status:')),
+            )];
+
             let pullRequest = existingPullRequests[0];
             if (!pullRequest) {
               const response = await github.rest.pulls.create({
@@ -489,6 +495,16 @@ jobs:
               pullRequest = response.data;
             } else {
               core.info(`An open implementation PR already exists: #${pullRequest.number}`);
+            }
+
+            if (labelsToPropagate.length > 0) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: pullRequest.number,
+                labels: labelsToPropagate,
+              });
+              core.info(`Propagated labels to implementation PR: ${labelsToPropagate.join(', ')}`);
             }
 
             const comments = await github.paginate(
