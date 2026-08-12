@@ -1186,6 +1186,189 @@ function CollectionInfo({ collection }: { collection: Collection }): ReactElemen
   );
 }
 
+function CaptionFolderCard({ folder }: { folder: CaptionFolder }): ReactElement {
+  return (
+    <button
+      className="caption-folder-card"
+      style={{ "--folder-color": folder.color } as CSSProperties}
+      onClick={() => navigate(`/captions/${folder.id}`)}
+    >
+      <span className="caption-folder-icon"><Icon name="folder" /></span>
+      <span className="caption-folder-copy">
+        <strong>{folder.title}</strong>
+        <small>{folder.subtitle || "No description yet"}</small>
+        <span>{folder.captionCount} {folder.captionCount === 1 ? "caption" : "captions"}</span>
+      </span>
+      <Icon name="arrow" />
+    </button>
+  );
+}
+
+function CaptionsPage(): ReactElement {
+  const [folderDialog, setFolderDialog] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const folders = useApi<{ items: CaptionFolder[] }>("/api/caption-folders", refresh);
+  return (
+    <>
+      <SectionHeader
+        eyebrow="Library"
+        title="Captions"
+        description="Keep reusable copy organized in folders and turn your best examples into new ideas."
+        action={
+          <Button variant="primary" onClick={() => setFolderDialog(true)}>
+            <Icon name="plus" /> New folder
+          </Button>
+        }
+      />
+      {folders.error ? (
+        <ErrorState message={folders.error} retry={() => setRefresh((value) => value + 1)} />
+      ) : folders.loading ? (
+        <div className="caption-folder-grid">
+          {Array.from({ length: 6 }).map((_, index) => <div className="skeleton caption-folder-skeleton" key={index} />)}
+        </div>
+      ) : folders.data?.items.length ? (
+        <div className="caption-folder-grid">
+          {folders.data.items.map((folder) => <CaptionFolderCard folder={folder} key={folder.id} />)}
+        </div>
+      ) : (
+        <EmptyState
+          icon="folder"
+          title="No caption folders yet"
+          message="Create your first folder to start building a reusable caption library."
+          action={<Button variant="primary" onClick={() => setFolderDialog(true)}><Icon name="plus" /> Create folder</Button>}
+        />
+      )}
+      {folderDialog && (
+        <CaptionFolderDialog
+          onClose={() => setFolderDialog(false)}
+          onSaved={() => {
+            setFolderDialog(false);
+            setRefresh((value) => value + 1);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function CaptionFolderPage({ id }: { id: string }): ReactElement {
+  const [refresh, setRefresh] = useState(0);
+  const [editor, setEditor] = useState<{ caption?: Caption; initialBody?: string } | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const folder = useApi<CaptionFolder>(`/api/caption-folders/${id}`, refresh);
+  const captions = useApi<{ items: Caption[] }>(`/api/caption-folders/${id}/captions`, refresh);
+  const aiStatus = useApi<CaptionAiStatus>("/api/captions/ai-status", refresh);
+  if (folder.loading || captions.loading) return <PageLoading />;
+  if (folder.error || !folder.data) return <ErrorState message={folder.error ?? "Caption folder not found"} />;
+  const item = folder.data;
+  const items = captions.data?.items ?? [];
+  const openRandom = (): void => {
+    setNotice("");
+    if (!items.length) {
+      setNotice("Save at least one caption in this folder before choosing one at random.");
+      return;
+    }
+    setEditor({ caption: items[Math.floor(Math.random() * items.length)] });
+  };
+  const refreshAfterSave = (): void => {
+    setEditor(null);
+    setRefresh((value) => value + 1);
+  };
+  return (
+    <>
+      <button className="back-link" onClick={() => navigate("/captions")}>
+        ← Back to captions
+      </button>
+      <SectionHeader
+        eyebrow="Caption folder"
+        title={item.title}
+        description={item.subtitle || "Reusable copy for your next piece of content."}
+        action={
+          <div className="caption-folder-actions">
+            <Button variant="secondary" onClick={openRandom} disabled={!items.length}>
+              <Icon name="shuffle" /> Pick random
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setPromptOpen(true)}
+              disabled={aiStatus.loading || !aiStatus.data?.ready}
+              title={aiStatus.data?.message ?? undefined}
+            >
+              <Icon name="sparkles" /> Generate with AI
+            </Button>
+          </div>
+        }
+      />
+      {aiStatus.data && !aiStatus.data.ready && (
+        <div className="caption-ai-notice">
+          <Icon name="alert" />
+          <span>{aiStatus.data.message || "AI generation is currently unavailable."}</span>
+        </div>
+      )}
+      {aiStatus.error && (
+        <div className="caption-ai-notice">
+          <Icon name="alert" />
+          <span>AI generation is unavailable until the provider status can be checked.</span>
+        </div>
+      )}
+      {notice && <div className="caption-inline-notice">{notice}</div>}
+      {captions.error ? (
+        <ErrorState message={captions.error} retry={() => setRefresh((value) => value + 1)} />
+      ) : items.length ? (
+        <div className="caption-grid">
+          {items.map((caption) => (
+            <button
+              className="caption-card"
+              style={{ "--caption-color": caption.color } as CSSProperties}
+              key={caption.id}
+              onClick={() => setEditor({ caption })}
+            >
+              <span className="caption-card-top">
+                <span className="caption-file-icon"><Icon name="captions" /></span>
+                <span>{formatDate(caption.updatedAt)}</span>
+              </span>
+              <strong>{caption.preview || "Untitled caption"}</strong>
+              <span className="caption-card-excerpt">{caption.body}</span>
+              <span className="caption-card-footer">Open caption <Icon name="arrow" /></span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          icon="captions"
+          title="This folder is empty"
+          message="Add a caption manually or generate a draft with AI to get started."
+          action={<Button variant="primary" onClick={() => setEditor({})}><Icon name="plus" /> New caption</Button>}
+        />
+      )}
+      <button className="caption-floating-create" onClick={() => setEditor({})} aria-label="Create a new caption">
+        <Icon name="plus" />
+      </button>
+      {promptOpen && (
+        <CaptionAiPromptDialog
+          folderId={id}
+          onClose={() => setPromptOpen(false)}
+          onGenerated={(body) => {
+            setPromptOpen(false);
+            setEditor({ initialBody: body });
+          }}
+        />
+      )}
+      {editor && (
+        <CaptionEditorDialog
+          key={`${editor.caption?.id ?? "new"}:${editor.initialBody ?? ""}`}
+          folderId={id}
+          caption={editor.caption}
+          initialBody={editor.initialBody}
+          onClose={() => setEditor(null)}
+          onSaved={refreshAfterSave}
+        />
+      )}
+    </>
+  );
+}
+
 function AssetsPage({ onOpenAsset }: { onOpenAsset: (asset: Asset) => void }): ReactElement {
   const [search, setSearch] = useState("");
   const [media, setMedia] = useState("");
@@ -2311,6 +2494,184 @@ function Modal({ title, onClose, children, wide = false }: { title: string; onCl
         {children}
       </div>
     </div>
+  );
+}
+
+function CaptionFolderDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (folder: CaptionFolder) => void }): ReactElement {
+  const [title, setTitle] = useState("");
+  const [subtitle, setSubtitle] = useState("");
+  const [color, setColor] = useState("#2468ec");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await request<CaptionFolder>("/api/caption-folders", {
+        method: "POST",
+        body: JSON.stringify({ title: title.trim(), subtitle: subtitle.trim(), color }),
+      });
+      onSaved(saved);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create folder");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title="New caption folder" onClose={onClose}>
+      <form onSubmit={submit}>
+        <label className="form-field">
+          <span>Folder title</span>
+          <input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Product launches" maxLength={120} />
+        </label>
+        <label className="form-field">
+          <span>Subtitle <small>Optional</small></span>
+          <input value={subtitle} onChange={(event) => setSubtitle(event.target.value)} placeholder="A short note about this folder" maxLength={240} />
+        </label>
+        <label className="form-field color-field">
+          <span>Folder color</span>
+          <span className="color-input-wrap">
+            <input type="color" value={color} onChange={(event) => setColor(event.target.value)} aria-label="Folder color" />
+            <code>{color}</code>
+          </span>
+        </label>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="modal-footer">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={saving}>{saving ? "Creating…" : "Create folder"}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function CaptionEditorDialog({
+  folderId,
+  caption,
+  initialBody,
+  onClose,
+  onSaved,
+}: {
+  folderId: string;
+  caption?: Caption;
+  initialBody?: string;
+  onClose: () => void;
+  onSaved: (caption: Caption) => void;
+}): ReactElement {
+  const originalBody = caption?.body ?? initialBody ?? "";
+  const originalColor = caption?.color ?? "#f59e0b";
+  const [body, setBody] = useState(originalBody);
+  const [color, setColor] = useState(originalColor);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const close = (): void => {
+    if ((body !== originalBody || color !== originalColor) && !window.confirm("Discard unsaved caption changes?")) return;
+    onClose();
+  };
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const saved = caption
+        ? await request<Caption>(`/api/captions/${caption.id}`, { method: "PATCH", body: JSON.stringify({ body, color }) })
+        : await request<Caption>(`/api/caption-folders/${folderId}/captions`, { method: "POST", body: JSON.stringify({ body, color }) });
+      onSaved(saved);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save caption");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title={caption ? "Edit caption" : "New caption"} onClose={close} wide>
+      <form onSubmit={submit}>
+        <label className="form-field caption-editor-field">
+          <span>Caption text</span>
+          <textarea
+            autoFocus
+            required
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            placeholder="Write or paste your caption here…"
+            rows={14}
+            maxLength={20000}
+          />
+          <small>Line breaks are preserved when the caption is saved.</small>
+        </label>
+        <label className="form-field color-field">
+          <span>Card color</span>
+          <span className="color-input-wrap">
+            <input type="color" value={color} onChange={(event) => setColor(event.target.value)} aria-label="Caption card color" />
+            <code>{color}</code>
+          </span>
+        </label>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="modal-footer">
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save caption"}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function CaptionAiPromptDialog({
+  folderId,
+  onClose,
+  onGenerated,
+}: {
+  folderId: string;
+  onClose: () => void;
+  onGenerated: (body: string) => void;
+}): ReactElement {
+  const [prompt, setPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    setGenerating(true);
+    setError("");
+    try {
+      const result = await request<{ caption: string; examplesUsed: number }>(`/api/caption-folders/${folderId}/captions/generate`, {
+        method: "POST",
+        body: JSON.stringify({ prompt: prompt.trim() }),
+      });
+      onGenerated(result.caption);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not generate caption");
+    } finally {
+      setGenerating(false);
+    }
+  };
+  return (
+    <Modal title="Generate a caption with AI" onClose={onClose}>
+      <form onSubmit={submit}>
+        <p className="caption-ai-intro">Describe the idea, angle, audience, or call to action you want. The folder’s saved captions will be used as style references.</p>
+        <label className="form-field caption-editor-field">
+          <span>Your prompt</span>
+          <textarea
+            autoFocus
+            required
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="e.g. Write a warm caption introducing a 3-step morning routine"
+            rows={5}
+            maxLength={1000}
+          />
+        </label>
+        <div className="caption-ai-context"><Icon name="sparkles" /> Up to 100 saved captions from this folder will be included as examples.</div>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="modal-footer">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={generating || !prompt.trim()}>
+            {generating ? "Generating…" : "Generate draft"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -4552,6 +4913,7 @@ function App(): ReactElement {
   let content: ReactNode;
   if (route.page === "home") content = <DashboardPage onOpenAsset={setAsset} />;
   if (route.page === "collections") content = route.id ? <CollectionDetailPage id={route.id} onOpenAsset={setAsset} /> : <CollectionsPage />;
+  if (route.page === "captions") content = route.id ? <CaptionFolderPage id={route.id} /> : <CaptionsPage />;
   if (route.page === "assets") content = <AssetsPage onOpenAsset={setAsset} />;
   if (route.page === "projects")
     content = route.id ? (
