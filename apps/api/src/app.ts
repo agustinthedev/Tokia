@@ -1275,20 +1275,31 @@ export async function buildApp(
     async (request, reply) => {
       if (!integrationGuard(settings, request, reply)) return;
       const body = bodyOf(request);
-      const title = text(body.title, 120);
-      if (!title)
+      if (typeof body.title !== "string" || !body.title.trim())
         throw new ContentValidationError(
           "INVALID_CAPTION_FOLDER_TITLE",
           "Folder title is required.",
         );
-      const subtitle = body.subtitle === undefined || body.subtitle === null
-        ? null
-        : text(body.subtitle, 240);
-      if (body.subtitle !== undefined && body.subtitle !== null && typeof body.subtitle !== "string")
+      const title = body.title.trim();
+      if (title.length > 120)
         throw new ContentValidationError(
-          "INVALID_CAPTION_FOLDER_SUBTITLE",
-          "Folder subtitle must be text.",
+          "CAPTION_FOLDER_TITLE_TOO_LONG",
+          "Folder title must be 120 characters or fewer.",
         );
+      let subtitle: string | null = null;
+      if (body.subtitle !== undefined && body.subtitle !== null) {
+        if (typeof body.subtitle !== "string")
+          throw new ContentValidationError(
+            "INVALID_CAPTION_FOLDER_SUBTITLE",
+            "Folder subtitle must be text.",
+          );
+        subtitle = body.subtitle.trim() || null;
+        if (subtitle && subtitle.length > 240)
+          throw new ContentValidationError(
+            "CAPTION_FOLDER_SUBTITLE_TOO_LONG",
+            "Folder subtitle must be 240 characters or fewer.",
+          );
+      }
       const color = hexColor(body.color, DEFAULT_FOLDER_COLOR);
       const timestamp = now();
       const id = newId();
