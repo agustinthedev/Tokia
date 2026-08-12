@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { renderSlideshow, textOverlayLayout } from '../src/content-media.js';
-import { mergeConfiguration } from '../src/content-model.js';
+import { renderSlideshow, SLIDESHOW_VIDEO_ENCODING, textOverlayLayout } from '../src/content-media.js';
+import { mergeConfiguration, ratioDimensions } from '../src/content-model.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -94,6 +94,65 @@ describe('video slideshow audio', () => {
       };
       expect(await volume(unmutedPath)).toBeGreaterThan(-40);
       expect(await volume(mutedPath)).toBeLessThan(-80);
+    } finally {
+      await fsp.rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+describe('video slideshow output quality', () => {
+  it('maps resolution settings to standard canvas dimensions', () => {
+    expect(ratioDimensions('16:9', '1080p')).toEqual({ width: 1920, height: 1080 });
+    expect(ratioDimensions('16:9', '720p')).toEqual({ width: 1280, height: 720 });
+    expect(ratioDimensions('9:16', '1080p')).toEqual({ width: 1080, height: 1920 });
+    expect(ratioDimensions('9:16', '720p')).toEqual({ width: 720, height: 1280 });
+    expect(ratioDimensions('4:5', '1080p')).toEqual({ width: 864, height: 1080 });
+    expect(ratioDimensions('1:1', '1080p')).toEqual({ width: 1080, height: 1080 });
+  });
+
+  it('uses an explicit high-quality H.264 encoding contract', () => {
+    expect(SLIDESHOW_VIDEO_ENCODING).toMatchObject({
+      codec: 'libx264',
+      preset: 'slow',
+      profile: 'high',
+      bitrate: '10M',
+      maxRate: '12M',
+      bufferSize: '24M',
+      pixelFormat: 'yuv420p',
+      audioBitrate: '192k'
+    });
+  });
+
+  it('renders a 1080p landscape slideshow at full HD dimensions', async () => {
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'tokia-slideshow-quality-'));
+    try {
+      const imagePath = path.join(directory, 'image.png');
+      const outputPath = path.join(directory, 'output.mp4');
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=green:s=64x64', '-frames:v', '1', imagePath]);
+      await renderSlideshow({
+        ffmpegPath: 'ffmpeg',
+        ffprobePath: 'ffprobe',
+        imagePaths: [imagePath],
+        outputPath,
+        configuration: mergeConfiguration({
+          aspectRatio: '16:9',
+          textMode: 'none',
+          video: { outputResolution: '1080p', fps: 24, secondsPerImage: 0.5, transition: 'none' }
+        })
+      });
+      const probe = JSON.parse((await execFileAsync('ffprobe', [
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name,width,height,pix_fmt',
+        '-of', 'json',
+        outputPath
+      ])).stdout) as { streams?: Array<Record<string, unknown>> };
+      expect(probe.streams?.[0]).toMatchObject({
+        codec_name: 'h264',
+        width: 1920,
+        height: 1080,
+        pix_fmt: 'yuv420p'
+      });
     } finally {
       await fsp.rm(directory, { recursive: true, force: true });
     }
