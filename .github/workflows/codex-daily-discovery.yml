@@ -215,6 +215,8 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5.6-luna
+          effort: low
           prompt-file: .github/codex/runtime/daily-discovery.md
           output-file: .github/codex/runtime/daily-discovery-output.json
           codex-args: >-
