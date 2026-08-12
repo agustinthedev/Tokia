@@ -163,7 +163,11 @@ jobs:
               },
             );
 
-            if (existingComments.some((comment) => comment.body?.includes(marker))) {
+            if (existingComments.some((comment) =>
+              comment.user?.type === 'Bot' &&
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.includes(marker)
+            )) {
               core.info('A response for this comment already exists; skipping a duplicate.');
               return;
             }
