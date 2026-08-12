@@ -34,6 +34,8 @@ The publishing job creates the required labels if they do not already exist:
 
 - `source:codex`
 - `status:proposed`
+- `status:accepted`
+- `status:in-development`
 - `type:bug`
 - `type:security`
 - `type:tech-debt`
@@ -56,6 +58,12 @@ What is the smallest safe fix for this issue?
 The command must start the comment. Comments from bots, external contributors, pull requests, and untrusted accounts are ignored. The workflow reads the issue and its recent comment thread, runs Codex with read-only repository access, and posts the answer back to the issue.
 
 Responses are deduplicated by the triggering comment ID. The workflow uses one concurrency group per issue, so only one response for a given issue runs at a time while different issues can be handled independently. To avoid replacing a pending command, wait for the current `/codex` response before posting another command on the same issue.
+
+## Issue implementation
+
+The `Codex issue implementation` workflow starts when a maintainer adds `status:accepted` to an open issue carrying the `source:codex` label. It changes the issue to `status:in-development`, prepares a branch named `codex/issue-N`, and gives Codex workspace-write access to implement only that issue.
+
+Codex must create focused conventional commits, run the relevant checks, and leave no uncommitted changes. The workflow pushes the branch and opens a pull request against `master` only when implementation commits exist. Implementations run one at a time across issues, and GitHub keeps at most one pending run per concurrency group. Accept issues sequentially: if a third issue is accepted before the active and pending work finish, GitHub may replace the older pending run. This workflow intentionally does not provide a durable queue.
 
 ## Schedule and testing
 
