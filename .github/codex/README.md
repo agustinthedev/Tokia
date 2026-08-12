@@ -59,6 +59,10 @@ The command must start the comment. Comments from bots, external contributors, p
 
 Responses are deduplicated by the triggering comment ID. The workflow uses one concurrency group per issue, so only one response for a given issue runs at a time while different issues can be handled independently. To avoid replacing a pending command, wait for the current `/codex` response before posting another command on the same issue.
 
+## Model routing
+
+The high-volume workflows use `gpt-5.6-luna` with low reasoning effort to reduce cost while handling deterministic discovery and concise issue responses. The issue implementation workflow uses `gpt-5.6-terra` with medium reasoning effort because it must inspect the repository, modify code, run checks, and produce a validated commit plan. These settings are declared directly in each workflow's `openai/codex-action` step.
+
 ## Issue implementation
 
 The `Codex issue implementation` workflow starts when a maintainer adds `status:accepted` to an open issue carrying the `source:codex` label. It changes the issue to `status:in-development`, prepares a branch named `codex/issue-N`, and gives Codex workspace-write access to implement only that issue.
