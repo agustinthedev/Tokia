@@ -63,7 +63,7 @@ Responses are deduplicated by the triggering comment ID. The workflow uses one c
 
 The `Codex issue implementation` workflow starts when a maintainer adds `status:accepted` to an open issue carrying the `source:codex` label. It changes the issue to `status:in-development`, prepares a branch named `codex/issue-N`, and gives Codex workspace-write access to implement only that issue.
 
-Codex must create focused conventional commits, run the relevant checks, and leave no uncommitted changes. The workflow pushes the branch and opens a pull request against `master` only when implementation commits exist. Implementations run one at a time across issues; if several issues are accepted while one is running, GitHub keeps at most one pending implementation run, so accepting issues sequentially is recommended.
+Codex must create focused conventional commits, run the relevant checks, and leave no uncommitted changes. The workflow pushes the branch and opens a pull request against `master` only when implementation commits exist. Implementations run one at a time across issues, and GitHub keeps at most one pending run per concurrency group. Accept issues sequentially: if a third issue is accepted before the active and pending work finish, GitHub may replace the older pending run. This workflow intentionally does not provide a durable queue.
 
 ## Schedule and testing
 
