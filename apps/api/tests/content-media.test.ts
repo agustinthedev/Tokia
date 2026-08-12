@@ -189,6 +189,29 @@ describe('video slideshow output quality', () => {
       await fsp.rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it('renders the maximum scene count without overflowing the Windows command line', async () => {
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'tokia-slideshow-many-scenes-'));
+    try {
+      const sourceDirectory = path.join(directory, 'source-directory-'.repeat(8));
+      await fsp.mkdir(sourceDirectory, { recursive: true });
+      const imagePath = path.join(sourceDirectory, 'image.png');
+      const outputPath = path.join(directory, 'output.mp4');
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=green:s=64x64', '-frames:v', '1', imagePath]);
+      const scenes = Array.from({ length: 100 }, () => ({ path: imagePath, mediaType: 'image' as const, durationSeconds: 0.2 }));
+      const result = await renderSlideshow({
+        ffmpegPath: 'ffmpeg',
+        ffprobePath: 'ffprobe',
+        scenes,
+        outputPath,
+        configuration: mergeConfiguration({ textMode: 'none', aspectRatio: '1:1', video: { outputResolution: '720p', qualityMode: 'balanced', fps: 10, secondsPerImage: 0.2, transition: 'none' } })
+      });
+      expect(result.durationMs).toBe(20_000);
+      expect((await fsp.stat(outputPath)).size).toBeGreaterThan(0);
+    } finally {
+      await fsp.rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe('video slideshow transitions', () => {
