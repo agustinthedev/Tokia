@@ -73,6 +73,6 @@ If implementation produces no commits or fails before a pull request is opened, 
 
 ## Schedule and testing
 
-The scheduled run is configured for 08:17 in `America/Montevideo`. Scheduled workflows use the latest commit on the default branch, so the workflow must be merged before the daily schedule can run.
+The scheduled run is configured for 06:17 in `America/Montevideo`. Scheduled workflows use the latest commit on the default branch, so the workflow must be merged before the daily schedule can run.
 
 Use **Actions → Codex daily discovery → Run workflow** to test it manually. Enable `force` to invoke Codex even when the deterministic gate finds no new signal.

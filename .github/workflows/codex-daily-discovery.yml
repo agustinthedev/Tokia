@@ -2,7 +2,7 @@ name: Codex daily discovery
 
 on:
   schedule:
-    - cron: "17 8 * * *"
+    - cron: "17 6 * * *"
       timezone: "America/Montevideo"
   workflow_dispatch:
     inputs:
