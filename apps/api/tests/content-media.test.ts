@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { renderSlideshow, SLIDESHOW_VIDEO_ENCODING, textOverlayLayout } from '../src/content-media.js';
+import { filterFor, renderSlideshow, shouldUpscale, SLIDESHOW_VIDEO_ENCODING, SLIDESHOW_VIDEO_ENCODINGS, textOverlayLayout } from '../src/content-media.js';
 import { mergeConfiguration, ratioDimensions } from '../src/content-model.js';
 
 const execFileAsync = promisify(execFile);
@@ -137,12 +137,22 @@ describe('video slideshow output quality', () => {
       codec: 'libx264',
       preset: 'slow',
       profile: 'high',
-      bitrate: '10M',
+      crf: 18,
       maxRate: '12M',
       bufferSize: '24M',
       pixelFormat: 'yuv420p',
       audioBitrate: '192k'
     });
+    expect(SLIDESHOW_VIDEO_ENCODINGS.balanced.crf).toBeGreaterThan(SLIDESHOW_VIDEO_ENCODINGS.high.crf);
+    expect(SLIDESHOW_VIDEO_ENCODINGS.maximum.crf).toBeLessThan(SLIDESHOW_VIDEO_ENCODINGS.high.crf);
+  });
+
+  it('sharpens only when the source is smaller than the output canvas', () => {
+    const configuration = mergeConfiguration({ textMode: 'none', aspectRatio: '16:9', video: { outputResolution: '1080p' } });
+    expect(shouldUpscale({ width: 640, height: 360 }, { width: 1920, height: 1080 })).toBe(true);
+    expect(shouldUpscale({ width: 3840, height: 2160 }, { width: 1920, height: 1080 })).toBe(false);
+    expect(filterFor(configuration, 1920, 1080, { width: 640, height: 360 })).toContain('unsharp=');
+    expect(filterFor(configuration, 1920, 1080, { width: 3840, height: 2160 })).not.toContain('unsharp=');
   });
 
   it('renders a 1080p landscape slideshow at full HD dimensions', async () => {
@@ -179,6 +189,30 @@ describe('video slideshow output quality', () => {
       await fsp.rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it('renders the maximum scene count without overflowing the Windows command line', async () => {
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'tokia-slideshow-many-scenes-'));
+    try {
+      const sourceDirectory = path.join(directory, 'source-directory-'.repeat(8));
+      await fsp.mkdir(sourceDirectory, { recursive: true });
+      const imagePath = path.join(sourceDirectory, 'image.png');
+      const outputPath = path.join(directory, 'output.mp4');
+      await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=green:s=64x64', '-frames:v', '1', imagePath]);
+      const scenes = Array.from({ length: 100 }, () => ({ path: imagePath, mediaType: 'image' as const, durationSeconds: 0.2 }));
+      const result = await renderSlideshow({
+        ffmpegPath: 'ffmpeg',
+        ffprobePath: 'ffprobe',
+        scenes,
+        outputPath,
+        configuration: mergeConfiguration({ textMode: 'none', aspectRatio: '1:1', video: { outputResolution: '720p', qualityMode: 'balanced', fps: 10, secondsPerImage: 0.2, transition: 'none' } })
+      });
+      expect(result.durationMs).toBe(20_000);
+      expect((await fsp.stat(outputPath)).size).toBeGreaterThan(0);
+      await expect(fsp.access(`${outputPath}.filtergraph`)).rejects.toThrow();
+    } finally {
+      await fsp.rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe('video slideshow transitions', () => {

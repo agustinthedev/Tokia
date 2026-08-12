@@ -2704,6 +2704,7 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
     },
     video: {
       outputResolution: "720p",
+      qualityMode: "high",
       fps: 30,
       secondsPerImage: 2.5,
       transition: "none",
@@ -3966,6 +3967,22 @@ function LegacyContentWizard({ project, existingId, onClose, onSaved, onSelectCl
                   >
                     <option>720p</option>
                     <option>1080p</option>
+                  </select>
+                </label>
+                <label className="form-field">
+                  <span>Export quality</span>
+                  <select
+                    value={config.video?.qualityMode ?? "high"}
+                    onChange={(event) =>
+                      updateConfig("video", {
+                        ...config.video,
+                        qualityMode: event.target.value,
+                      })
+                    }
+                  >
+                    <option value="balanced">Balanced</option>
+                    <option value="high">High quality</option>
+                    <option value="maximum">Maximum quality</option>
                   </select>
                 </label>
                 <label className="form-field">
