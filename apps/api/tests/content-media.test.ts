@@ -12,13 +12,35 @@ const execFileAsync = promisify(execFile);
 describe('content text overlays', () => {
   it('renders headline and body as distinct typographic layers', () => {
     const configuration = mergeConfiguration({ textMode: 'headline_and_body' });
-    const parts = textOverlayLayout(configuration, 405, 720, { headline: 'Life lately', body: 'I like it' });
+    const reference = ratioDimensions('9:16', '720p');
+    const parts = textOverlayLayout(configuration, reference.width, reference.height, { headline: 'Life lately', body: 'I like it' });
 
     expect(parts).toHaveLength(2);
     expect(parts[0]).toMatchObject({ key: 'headline', text: 'Life lately', fontSize: 54 });
     expect(parts[1]).toMatchObject({ key: 'body', text: 'I like it', fontSize: 31 });
     expect(parts[1]!.fontSize).toBeLessThan(parts[0]!.fontSize);
     expect(parts[1]!.y).toContain('+');
+  });
+
+  it('scales text metrics from the 720p design canvas for 1080p output', () => {
+    const configuration = mergeConfiguration({ textMode: 'headline_and_body' });
+    const reference = ratioDimensions('9:16', '720p');
+    const hd = ratioDimensions('9:16', '1080p');
+    const referenceParts = textOverlayLayout(configuration, reference.width, reference.height, { headline: 'Life lately', body: 'I like it' });
+    const hdParts = textOverlayLayout(configuration, hd.width, hd.height, { headline: 'Life lately', body: 'I like it' });
+
+    expect(hdParts[0]).toMatchObject({
+      fontSize: Math.round(referenceParts[0]!.fontSize * 1.5),
+      lineSpacing: Math.round(referenceParts[0]!.lineSpacing * 1.5),
+      boxBorderWidth: Math.round(referenceParts[0]!.boxBorderWidth * 1.5),
+      x: '90',
+    });
+    expect(hdParts[1]).toMatchObject({
+      fontSize: Math.round(referenceParts[1]!.fontSize * 1.5),
+      boxBorderWidth: Math.round(referenceParts[1]!.boxBorderWidth * 1.5),
+      x: '90',
+    });
+    expect(hdParts[0]!.y).toContain('-135');
   });
 
   it('wraps long copy without introducing a replacement glyph between fields', () => {
