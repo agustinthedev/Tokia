@@ -1,0 +1,404 @@
+name: Codex daily discovery
+
+on:
+  schedule:
+    - cron: "17 8 * * *"
+      timezone: "America/Montevideo"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run Codex even when the deterministic preflight gate finds no new signal"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: codex-daily-discovery
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Decide whether discovery is needed
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: read
+      security-events: read
+    outputs:
+      run_codex: ${{ steps.gate.outputs.run_codex }}
+      reasons: ${{ steps.gate.outputs.reasons }}
+      product_due: ${{ steps.gate.outputs.product_due }}
+    steps:
+      - name: Evaluate deterministic signals
+        id: gate
+        uses: actions/github-script@v7
+        env:
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+          PRODUCT_REVIEW_INTERVAL_DAYS: '1'
+          WORKFLOW_FILE: .github/workflows/codex-daily-discovery.yml
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const now = Date.now();
+            const since = new Date(now - 24 * 60 * 60 * 1000);
+            const reasons = [];
+            const forceRun = process.env.FORCE_RUN === 'true';
+            const productReviewIntervalDays = Number(process.env.PRODUCT_REVIEW_INTERVAL_DAYS || '1');
+
+            const recentCommits = await github.paginate(
+              github.rest.repos.listCommits,
+              {
+                owner,
+                repo,
+                since: since.toISOString(),
+                per_page: 100,
+              },
+            );
+
+            if (recentCommits.length > 0) {
+              reasons.push(`${recentCommits.length} commit(s) landed in the last 24 hours`);
+            }
+
+            const recentRuns = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              {
+                owner,
+                repo,
+                created: `>=${since.toISOString()}`,
+                status: 'completed',
+                per_page: 100,
+              },
+            );
+
+            const failedRuns = recentRuns.filter((run) =>
+              ['failure', 'timed_out', 'action_required'].includes(run.conclusion),
+            );
+
+            if (failedRuns.length > 0) {
+              reasons.push(`${failedRuns.length} workflow run(s) failed in the last 24 hours`);
+            }
+
+            let recentCodeScanningAlerts = 0;
+            try {
+              const response = await github.request(
+                'GET /repos/{owner}/{repo}/code-scanning/alerts',
+                {
+                  owner,
+                  repo,
+                  state: 'open',
+                  per_page: 100,
+                },
+              );
+
+              recentCodeScanningAlerts = response.data.filter((alert) => {
+                const changedAt = alert.updated_at || alert.created_at;
+                return changedAt && new Date(changedAt) >= since;
+              }).length;
+            } catch (error) {
+              core.warning(`Code scanning alerts were not available: ${error.message}`);
+            }
+
+            if (recentCodeScanningAlerts > 0) {
+              reasons.push(`${recentCodeScanningAlerts} code scanning alert(s) changed in the last 24 hours`);
+            }
+
+            let recentDependabotAlerts = 0;
+            try {
+              const response = await github.request(
+                'GET /repos/{owner}/{repo}/dependabot/alerts',
+                {
+                  owner,
+                  repo,
+                  state: 'open',
+                  per_page: 100,
+                },
+              );
+
+              recentDependabotAlerts = response.data.filter((alert) => {
+                const changedAt = alert.updated_at || alert.created_at;
+                return changedAt && new Date(changedAt) >= since;
+              }).length;
+            } catch (error) {
+              core.warning(`Dependabot alerts were not available: ${error.message}`);
+            }
+
+            if (recentDependabotAlerts > 0) {
+              reasons.push(`${recentDependabotAlerts} Dependabot alert(s) changed in the last 24 hours`);
+            }
+
+            const workflowRuns = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner,
+                repo,
+                workflow_id: process.env.WORKFLOW_FILE,
+                status: 'completed',
+                per_page: 20,
+              },
+            );
+
+            const previousSuccessfulRun = workflowRuns
+              .filter((run) => run.id !== context.runId && run.conclusion === 'success')
+              .sort((left, right) => new Date(right.updated_at) - new Date(left.updated_at))[0];
+
+            const productDue = !previousSuccessfulRun ||
+              now - new Date(previousSuccessfulRun.updated_at).getTime() >= productReviewIntervalDays * 24 * 60 * 60 * 1000;
+
+            if (productDue) {
+              reasons.push('the daily small product-improvement review is due');
+            }
+
+            if (forceRun) {
+              reasons.push('the workflow was manually forced');
+            }
+
+            const runCodex = forceRun || reasons.length > 0;
+
+            core.setOutput('run_codex', String(runCodex));
+            core.setOutput('product_due', String(productDue));
+            core.setOutput('reasons', JSON.stringify(reasons));
+
+            core.info(JSON.stringify({
+              runCodex,
+              productDue,
+              reasons,
+              recentCommits: recentCommits.length,
+              failedRuns: failedRuns.length,
+              recentCodeScanningAlerts,
+              recentDependabotAlerts,
+            }, null, 2));
+
+  analyze:
+    name: Analyze the repository with Codex
+    needs: gate
+    if: needs.gate.outputs.run_codex == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build the runtime prompt
+        env:
+          GATE_REASONS: ${{ needs.gate.outputs.reasons }}
+          PRODUCT_DUE: ${{ needs.gate.outputs.product_due }}
+        shell: bash
+        run: |
+          mkdir -p .github/codex/runtime
+          cp .github/codex/prompts/daily-discovery.md .github/codex/runtime/daily-discovery.md
+          {
+            printf '\n\n## Workflow preflight context\n'
+            printf '%s\n' "Product recommendation due: ${PRODUCT_DUE}"
+            printf '%s\n' "Signals: ${GATE_REASONS}"
+          } >> .github/codex/runtime/daily-discovery.md
+
+      - name: Run Codex discovery
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/runtime/daily-discovery.md
+          output-file: .github/codex/runtime/daily-discovery-output.json
+          codex-args: >-
+            ["--output-schema", ".github/codex/schemas/daily-discovery.json"]
+          sandbox: read-only
+          safety-strategy: drop-sudo
+
+  publish:
+    name: Publish non-duplicate findings as issues
+    needs:
+      - gate
+      - analyze
+    if: needs.gate.outputs.run_codex == 'true' && needs.analyze.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Publish findings
+        uses: actions/github-script@v7
+        env:
+          CODEX_OUTPUT: ${{ needs.analyze.outputs.final_message }}
+          GATE_REASONS: ${{ needs.gate.outputs.reasons }}
+          PRODUCT_DUE: ${{ needs.gate.outputs.product_due }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            function parseOutput(raw) {
+              const candidates = [raw.trim()];
+              const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+              if (fenced) candidates.push(fenced[1].trim());
+
+              for (const candidate of candidates) {
+                try {
+                  return JSON.parse(candidate);
+                } catch {
+                  // Try the next supported output shape.
+                }
+              }
+
+              throw new Error('Codex did not return valid JSON matching the discovery schema.');
+            }
+
+            function tokens(value) {
+              return new Set(
+                value
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, ' ')
+                  .split(/\s+/)
+                  .filter((token) => token.length > 2),
+              );
+            }
+
+            function titleSimilarity(left, right) {
+              const leftTokens = tokens(left);
+              const rightTokens = tokens(right);
+              if (leftTokens.size < 3 || rightTokens.size < 3) return 0;
+
+              const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+              const union = new Set([...leftTokens, ...rightTokens]).size;
+              return union === 0 ? 0 : intersection / union;
+            }
+
+            function formatEvidence(evidence) {
+              if (!Array.isArray(evidence) || evidence.length === 0) {
+                return '- No specific repository evidence was provided.';
+              }
+
+              return evidence.map((item) => {
+                const location = item.path ? `\`${item.path}${item.line ? `:${item.line}` : ''}\`` : 'Repository context';
+                return `- ${location} — ${item.detail}`;
+              }).join('\n');
+            }
+
+            function formatAcceptanceCriteria(criteria) {
+              if (!Array.isArray(criteria) || criteria.length === 0) {
+                return '- Define and verify the behavior described in this issue.';
+              }
+
+              return criteria.map((criterion) => `- ${criterion}`).join('\n');
+            }
+
+            const output = parseOutput(process.env.CODEX_OUTPUT || '');
+            const findings = Array.isArray(output.findings) ? output.findings : [];
+            const allowedTypes = new Set(['bug', 'security', 'tech-debt', 'product']);
+            const allowedPriorities = new Set(['high', 'medium', 'low']);
+
+            const validFindings = findings.filter((finding) =>
+              finding &&
+              typeof finding.title === 'string' &&
+              typeof finding.summary === 'string' &&
+              allowedTypes.has(finding.type) &&
+              allowedPriorities.has(finding.priority),
+            );
+
+            const engineeringFindings = validFindings
+              .filter((finding) => finding.type !== 'product')
+              .slice(0, 3);
+            const productFinding = process.env.PRODUCT_DUE === 'true'
+              ? validFindings.find((finding) => finding.type === 'product')
+              : undefined;
+            const selectedFindings = productFinding
+              ? [...engineeringFindings, productFinding]
+              : engineeringFindings;
+
+            const existingIssues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner,
+                repo,
+                state: 'all',
+                labels: 'source:codex',
+                per_page: 100,
+              },
+            );
+
+            const labelDefinitions = {
+              'source:codex': { color: '5319E7', description: 'Generated by the Codex discovery workflow' },
+              'status:proposed': { color: 'FBCA04', description: 'Proposed and waiting for human review' },
+              'type:bug': { color: 'D73A4A', description: 'A correctness or reliability issue' },
+              'type:security': { color: 'B60205', description: 'A security-related finding' },
+              'type:tech-debt': { color: '6F42C1', description: 'A maintainability or technical-debt item' },
+              'type:product': { color: '0E8A16', description: 'A small product improvement' },
+              'priority:high': { color: 'B60205', description: 'High priority' },
+              'priority:medium': { color: 'FBCA04', description: 'Medium priority' },
+              'priority:low': { color: 'C5DEF5', description: 'Low priority' },
+            };
+
+            for (const [name, definition] of Object.entries(labelDefinitions)) {
+              try {
+                await github.rest.issues.createLabel({ owner, repo, name, ...definition });
+              } catch (error) {
+                if (error.status !== 422) throw error;
+              }
+            }
+
+            let created = 0;
+            let skipped = 0;
+
+            for (const finding of selectedFindings) {
+              const duplicate = existingIssues.find((issue) =>
+                issue.title.trim().toLowerCase() === finding.title.trim().toLowerCase() ||
+                titleSimilarity(issue.title, finding.title) >= 0.8,
+              );
+
+              if (duplicate) {
+                skipped += 1;
+                core.info(`Skipped a likely duplicate: ${finding.title} (#${duplicate.number})`);
+                continue;
+              }
+
+              const labels = [
+                'source:codex',
+                'status:proposed',
+                `type:${finding.type}`,
+                `priority:${finding.priority}`,
+              ];
+
+              const body = [
+                '## Summary',
+                finding.summary,
+                '',
+                '## Why this matters',
+                finding.impact || 'The impact should be confirmed during review.',
+                '',
+                '## Evidence',
+                formatEvidence(finding.evidence),
+                '',
+                '## Proposed direction',
+                finding.recommendation || 'Investigate the evidence and choose the smallest safe change.',
+                '',
+                '## Acceptance criteria',
+                formatAcceptanceCriteria(finding.acceptanceCriteria),
+                '',
+                '## Confidence',
+                finding.confidence || 'medium',
+                '',
+                `<!-- codex-generated: ${context.runId} -->`,
+                `<!-- codex-gate-reasons: ${process.env.GATE_REASONS} -->`,
+              ].join('\n');
+
+              const issue = await github.rest.issues.create({
+                owner,
+                repo,
+                title: finding.title.trim().slice(0, 200),
+                body,
+                labels,
+              });
+
+              created += 1;
+              existingIssues.push(issue.data);
+              core.info(`Created issue #${issue.data.number}: ${finding.title}`);
+            }
+
+            core.notice(`Codex discovery published ${created} issue(s) and skipped ${skipped} duplicate(s).`);
