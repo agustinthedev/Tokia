@@ -82,6 +82,31 @@ describe("captions library", () => {
   it("validates caption input and persists edits", async () => {
     await setup();
     const folder = await createFolder();
+    const updatedFolder = await app!.inject({
+      method: "PATCH",
+      url: `/api/caption-folders/${folder.id}`,
+      headers,
+      payload: { title: "Updated ideas", subtitle: "A new description", color: "#16a34a" },
+    });
+    expect(updatedFolder.statusCode).toBe(200);
+    expect(updatedFolder.json()).toMatchObject({
+      id: folder.id,
+      title: "Updated ideas",
+      subtitle: "A new description",
+      color: "#16a34a",
+    });
+
+    const folderAfterReload = await app!.inject({
+      method: "GET",
+      url: `/api/caption-folders/${folder.id}`,
+    });
+    expect(folderAfterReload.statusCode).toBe(200);
+    expect(folderAfterReload.json()).toMatchObject({
+      title: "Updated ideas",
+      subtitle: "A new description",
+      color: "#16a34a",
+    });
+
     const invalidFolder = await app!.inject({
       method: "POST",
       url: "/api/caption-folders",

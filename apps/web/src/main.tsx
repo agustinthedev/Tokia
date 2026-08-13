@@ -481,9 +481,9 @@ function Icon({ name }: { name: string }): ReactElement {
   );
 }
 
-function Button({ children, variant = "secondary", onClick, type = "button", disabled = false, className = "", title }: { children: ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger"; onClick?: () => void; type?: "button" | "submit"; disabled?: boolean; className?: string; title?: string }): ReactElement {
+function Button({ children, variant = "secondary", onClick, type = "button", disabled = false, className = "", title, ariaLabel }: { children: ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger"; onClick?: () => void; type?: "button" | "submit"; disabled?: boolean; className?: string; title?: string; ariaLabel?: string }): ReactElement {
   return (
-    <button type={type} className={`button button-${variant} ${className}`} onClick={onClick} disabled={disabled} title={title}>
+    <button type={type} className={`button button-${variant} ${className}`} onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel}>
       {children}
     </button>
   );
@@ -1254,6 +1254,7 @@ function CaptionsPage(): ReactElement {
 function CaptionFolderPage({ id }: { id: string }): ReactElement {
   const [refresh, setRefresh] = useState(0);
   const [editor, setEditor] = useState<{ caption?: Caption; initialBody?: string } | null>(null);
+  const [folderDialog, setFolderDialog] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const folder = useApi<CaptionFolder>(`/api/caption-folders/${id}`, refresh);
@@ -1286,6 +1287,15 @@ function CaptionFolderPage({ id }: { id: string }): ReactElement {
         description={item.subtitle || "Reusable copy for your next piece of content."}
         action={
           <div className="caption-folder-actions">
+            <Button
+              variant="secondary"
+              onClick={() => setFolderDialog(true)}
+              title="Edit folder"
+              ariaLabel="Edit folder"
+              className="caption-folder-edit"
+            >
+              <Icon name="edit" />
+            </Button>
             <Button variant="secondary" onClick={openRandom} disabled={!items.length}>
               <Icon name="shuffle" /> Pick random
             </Button>
@@ -1363,6 +1373,16 @@ function CaptionFolderPage({ id }: { id: string }): ReactElement {
           initialBody={editor.initialBody}
           onClose={() => setEditor(null)}
           onSaved={refreshAfterSave}
+        />
+      )}
+      {folderDialog && (
+        <CaptionFolderDialog
+          folder={item}
+          onClose={() => setFolderDialog(false)}
+          onSaved={() => {
+            setFolderDialog(false);
+            setRefresh((value) => value + 1);
+          }}
         />
       )}
     </>
@@ -2497,10 +2517,11 @@ function Modal({ title, onClose, children, wide = false }: { title: string; onCl
   );
 }
 
-function CaptionFolderDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (folder: CaptionFolder) => void }): ReactElement {
-  const [title, setTitle] = useState("");
-  const [subtitle, setSubtitle] = useState("");
-  const [color, setColor] = useState("#2468ec");
+function CaptionFolderDialog({ folder, onClose, onSaved }: { folder?: CaptionFolder; onClose: () => void; onSaved: (folder: CaptionFolder) => void }): ReactElement {
+  const editing = Boolean(folder);
+  const [title, setTitle] = useState(folder?.title ?? "");
+  const [subtitle, setSubtitle] = useState(folder?.subtitle ?? "");
+  const [color, setColor] = useState(folder?.color ?? "#2468ec");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent): Promise<void> => {
@@ -2508,19 +2529,19 @@ function CaptionFolderDialog({ onClose, onSaved }: { onClose: () => void; onSave
     setSaving(true);
     setError("");
     try {
-      const saved = await request<CaptionFolder>("/api/caption-folders", {
-        method: "POST",
+      const saved = await request<CaptionFolder>(editing ? `/api/caption-folders/${folder!.id}` : "/api/caption-folders", {
+        method: editing ? "PATCH" : "POST",
         body: JSON.stringify({ title: title.trim(), subtitle: subtitle.trim(), color }),
       });
       onSaved(saved);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create folder");
+      setError(caught instanceof Error ? caught.message : `Could not ${editing ? "update" : "create"} folder`);
     } finally {
       setSaving(false);
     }
   };
   return (
-    <Modal title="New caption folder" onClose={onClose}>
+    <Modal title={editing ? "Edit caption folder" : "New caption folder"} onClose={onClose}>
       <form onSubmit={submit}>
         <label className="form-field">
           <span>Folder title</span>
@@ -2540,7 +2561,7 @@ function CaptionFolderDialog({ onClose, onSaved }: { onClose: () => void; onSave
         {error && <div className="inline-error">{error}</div>}
         <div className="modal-footer">
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" type="submit" disabled={saving}>{saving ? "Creating…" : "Create folder"}</Button>
+          <Button variant="primary" type="submit" disabled={saving}>{saving ? (editing ? "Saving…" : "Creating…") : (editing ? "Save folder" : "Create folder")}</Button>
         </div>
       </form>
     </Modal>

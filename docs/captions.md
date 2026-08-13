@@ -16,6 +16,7 @@ con AI a partir de ejemplos existentes.
    - título obligatorio;
    - subtítulo opcional;
    - color obligatorio con un valor hexadecimal válido.
+   Desde el interior de la carpeta también debe poder editar esos mismos datos.
 4. Al abrir una carpeta se deben listar sus captions guardados como tarjetas o
    ficheros con icono de notepad. El nombre visible se deriva del comienzo del
    caption y no requiere un título adicional.
@@ -54,6 +55,7 @@ con AI a partir de ejemplos existentes.
 
 - `GET /api/caption-folders`
 - `POST /api/caption-folders`
+- `PATCH /api/caption-folders/:id`
 - `GET /api/caption-folders/:id`
 - `GET /api/caption-folders/:id/captions`
 - `POST /api/caption-folders/:id/captions`
@@ -69,6 +71,8 @@ visible con una vista previa acotada.
 
 - Crear una carpeta, recargar la página y verla nuevamente con su subtítulo,
   color y contador actualizado.
+- Editar el título, subtítulo o color de una carpeta desde su vista interior y
+  conservar los cambios después de recargar.
 - Crear y editar un caption con varias líneas; después de recargar, los enters
   siguen presentes tanto en el editor como en la tarjeta.
 - El selector aleatorio sólo abre captions de la carpeta actual.
