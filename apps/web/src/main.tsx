@@ -119,6 +119,7 @@ interface CaptionAiStatus {
   providerName?: string | null;
   message?: string | null;
 }
+const DEFAULT_CAPTION_AI_PROMPT = "These are captions from social media posts. Generate a new caption that is similar to the saved examples in tone, style, structure, and length. Keep it natural, engaging, and ready to publish.";
 interface Project {
   id: string;
   name: string;
@@ -2648,7 +2649,7 @@ function CaptionAiPromptDialog({
   onClose: () => void;
   onGenerated: (body: string) => void;
 }): ReactElement {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(DEFAULT_CAPTION_AI_PROMPT);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent): Promise<void> => {
@@ -2683,7 +2684,7 @@ function CaptionAiPromptDialog({
             maxLength={1000}
           />
         </label>
-        <div className="caption-ai-context"><Icon name="sparkles" /> Up to 100 saved captions from this folder will be included as examples.</div>
+        <div className="caption-ai-context"><Icon name="sparkles" /> Up to 30 saved captions from this folder will be included as examples.</div>
         {error && <div className="inline-error">{error}</div>}
         <div className="modal-footer">
           <Button onClick={onClose}>Cancel</Button>
