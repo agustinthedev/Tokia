@@ -913,3 +913,18 @@ export function touchRequest(
     now(),
   );
 }
+
+export function assignedProvider(
+  db: Database.Database,
+  task: AiTask,
+  ownerScope = "local",
+): Row | undefined {
+  return db
+    .prepare(
+      `SELECT p.*
+       FROM ai_task_assignments a
+       JOIN ai_provider_connections p ON p.id = a.provider_connection_id
+       WHERE a.owner_scope = ? AND a.task_type = ?`,
+    )
+    .get(ownerScope, task) as Row | undefined;
+}
