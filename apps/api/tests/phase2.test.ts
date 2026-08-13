@@ -29,7 +29,14 @@ async function setup() {
   return { db, app };
 }
 
-async function importBoard(app: Awaited<ReturnType<typeof buildApp>>) {
+async function importBoard(
+  app: Awaited<ReturnType<typeof buildApp>>,
+  options: {
+    boardId?: string;
+    boardName?: string;
+    pins?: ReturnType<typeof pin>[];
+  } = {},
+) {
   return app.inject({
     method: 'POST',
     url: '/api/imports/pinterest-board',
@@ -39,11 +46,11 @@ async function importBoard(app: Awaited<ReturnType<typeof buildApp>>) {
       source: 'pinterest-browser-extension',
       exportedAt: new Date().toISOString(),
       board: {
-        externalId: 'phase2-board',
-        name: 'Phase 2 Board',
-        url: 'https://www.pinterest.com/demo/phase2/'
+        externalId: options.boardId ?? 'phase2-board',
+        name: options.boardName ?? 'Phase 2 Board',
+        url: `https://www.pinterest.com/demo/${options.boardId ?? 'phase2-board'}/`
       },
-      pins: [
+      pins: options.pins ?? [
         pin('image-1'),
         pin('video-1', {
           imageUrl: 'https://i.pinimg.com/posters/video-1.jpg',
@@ -129,6 +136,45 @@ describe('Phase 2 management API', () => {
     expect((await app.inject({ method: 'GET', url: '/api/projects?pageSize=100' })).json().items).toHaveLength(0);
     expect((await app.inject({ method: 'GET', url: '/api/search?q=Launch' })).json().projects).toHaveLength(0);
     expect((await app.inject({ method: 'GET', url: `/api/projects/${project.id}` })).statusCode).toBe(404);
+  });
+
+  it('omits archived collections and assets from global search while retaining active matches', async () => {
+    ({ db, app } = await setup());
+    const active = await importBoard(app, {
+      boardId: 'global-search-active',
+      boardName: 'Global Search Collection',
+      pins: [pin('global-search-active', { title: 'Global Search Asset' })]
+    });
+    const archived = await importBoard(app, {
+      boardId: 'global-search-archived',
+      boardName: 'Global Search Collection',
+      pins: [pin('global-search-archived', { title: 'Global Search Asset' })]
+    });
+    expect(active.statusCode).toBe(200);
+    expect(archived.statusCode).toBe(200);
+
+    const activeCollectionId = active.json().collection.id as string;
+    const archivedCollectionId = archived.json().collection.id as string;
+    const activeAssetId = (db!.prepare('SELECT id FROM assets WHERE external_asset_id = ?').get('global-search-active') as { id: string }).id;
+    const archivedAssetId = (db!.prepare('SELECT id FROM assets WHERE external_asset_id = ?').get('global-search-archived') as { id: string }).id;
+
+    expect((await app.inject({
+      method: 'PATCH',
+      url: `/api/collections/${archivedCollectionId}`,
+      headers: { 'x-local-integration-token': token },
+      payload: { status: 'disabled' }
+    })).statusCode).toBe(200);
+    expect((await app.inject({
+      method: 'PATCH',
+      url: `/api/assets/${archivedAssetId}`,
+      headers: { 'x-local-integration-token': token },
+      payload: { archived: true }
+    })).statusCode).toBe(200);
+
+    const search = await app.inject({ method: 'GET', url: '/api/search?q=Global%20Search' });
+    expect(search.statusCode).toBe(200);
+    expect(search.json().collections.map((collection: { id: string }) => collection.id)).toEqual([activeCollectionId]);
+    expect(search.json().assets.map((asset: { id: string }) => asset.id)).toEqual([activeAssetId]);
   });
 
   it('resolves a deferred Pinterest video source on demand', async () => {
