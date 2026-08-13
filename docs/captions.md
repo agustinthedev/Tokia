@@ -54,6 +54,7 @@ con AI a partir de ejemplos existentes.
 
 - `GET /api/caption-folders`
 - `POST /api/caption-folders`
+- `PATCH /api/caption-folders/:id`
 - `GET /api/caption-folders/:id`
 - `GET /api/caption-folders/:id/captions`
 - `POST /api/caption-folders/:id/captions`
