@@ -2663,7 +2663,7 @@ function CaptionAiPromptDialog({
             maxLength={1000}
           />
         </label>
-        <div className="caption-ai-context"><Icon name="sparkles" /> Up to 100 saved captions from this folder will be included as examples.</div>
+        <div className="caption-ai-context"><Icon name="sparkles" /> Up to 30 saved captions from this folder will be included as examples.</div>
         {error && <div className="inline-error">{error}</div>}
         <div className="modal-footer">
           <Button onClick={onClose}>Cancel</Button>
