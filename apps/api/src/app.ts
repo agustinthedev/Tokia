@@ -1314,6 +1314,66 @@ export async function buildApp(
     },
   );
 
+  app.patch(
+    "/api/caption-folders/:id",
+    { schema: { tags: ["captions"], summary: "Update a caption folder" } },
+    async (request, reply) => {
+      if (!integrationGuard(settings, request, reply)) return;
+      const { id } = request.params as { id: string };
+      const existing = db
+        .prepare("SELECT * FROM caption_folders WHERE id = ? AND archived_at IS NULL")
+        .get(id) as Row | undefined;
+      if (!existing)
+        return reply.code(404).send({
+          error: { code: "CAPTION_FOLDER_NOT_FOUND", message: "Caption folder not found." },
+        });
+      const body = bodyOf(request);
+      if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim()))
+        throw new ContentValidationError(
+          "INVALID_CAPTION_FOLDER_TITLE",
+          "Folder title is required.",
+        );
+      const title = body.title === undefined ? existing.title : body.title.trim();
+      if (title.length > 120)
+        throw new ContentValidationError(
+          "CAPTION_FOLDER_TITLE_TOO_LONG",
+          "Folder title must be 120 characters or fewer.",
+        );
+      let subtitle = existing.subtitle as string | null;
+      if (body.subtitle !== undefined) {
+        if (body.subtitle !== null && typeof body.subtitle !== "string")
+          throw new ContentValidationError(
+            "INVALID_CAPTION_FOLDER_SUBTITLE",
+            "Folder subtitle must be text.",
+          );
+        subtitle = typeof body.subtitle === "string" ? body.subtitle.trim() || null : null;
+        if (subtitle && subtitle.length > 240)
+          throw new ContentValidationError(
+            "CAPTION_FOLDER_SUBTITLE_TOO_LONG",
+            "Folder subtitle must be 240 characters or fewer.",
+          );
+      }
+      const color = body.color === undefined
+        ? existing.color
+        : hexColor(body.color, String(existing.color));
+      const timestamp = now();
+      db.prepare(
+        "UPDATE caption_folders SET title = ?, subtitle = ?, color = ?, updated_at = ? WHERE id = ?",
+      ).run(title, subtitle, color, timestamp, id);
+      return toCaptionFolder(
+        db
+          .prepare(
+            `SELECT f.*, COUNT(c.id) AS caption_count
+             FROM caption_folders f
+             LEFT JOIN captions c ON c.folder_id = f.id
+             WHERE f.id = ?
+             GROUP BY f.id`,
+          )
+          .get(id) as Row,
+      );
+    },
+  );
+
   app.get(
     "/api/caption-folders/:id",
     { schema: { tags: ["captions"], summary: "Get a caption folder" } },
