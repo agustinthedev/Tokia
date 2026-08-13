@@ -79,6 +79,49 @@ describe("captions library", () => {
     ]));
   });
 
+  it("soft-deletes a folder while preserving its captions", async () => {
+    await setup();
+    const folder = await createFolder("To delete");
+    const otherFolder = await createFolder("Keep this folder");
+    await createCaption(folder.id, "This caption should be deleted too");
+
+    const deleted = await app!.inject({
+      method: "DELETE",
+      url: `/api/caption-folders/${folder.id}`,
+      headers,
+    });
+    expect(deleted.statusCode).toBe(204);
+
+    const folderAfterDelete = await app!.inject({
+      method: "GET",
+      url: `/api/caption-folders/${folder.id}`,
+    });
+    expect(folderAfterDelete.statusCode).toBe(404);
+
+    const captionsAfterDelete = await app!.inject({
+      method: "GET",
+      url: `/api/caption-folders/${folder.id}/captions`,
+    });
+    expect(captionsAfterDelete.statusCode).toBe(404);
+
+    const folders = await app!.inject({ method: "GET", url: "/api/caption-folders" });
+    expect(folders.json().items).toEqual([
+      expect.objectContaining({ id: otherFolder.id, title: "Keep this folder" }),
+    ]);
+
+    const preservedFolder = db!.prepare("SELECT archived_at FROM caption_folders WHERE id = ?").get(folder.id) as { archived_at: string | null };
+    expect(preservedFolder.archived_at).toEqual(expect.any(String));
+    const preservedCaptions = db!.prepare("SELECT body FROM captions WHERE folder_id = ?").all(folder.id) as Array<{ body: string }>;
+    expect(preservedCaptions).toEqual([{ body: "This caption should be deleted too" }]);
+
+    const missingDelete = await app!.inject({
+      method: "DELETE",
+      url: `/api/caption-folders/${folder.id}`,
+      headers,
+    });
+    expect(missingDelete.statusCode).toBe(404);
+  });
+
   it("validates caption input and persists edits", async () => {
     await setup();
     const folder = await createFolder();

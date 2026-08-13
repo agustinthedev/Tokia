@@ -39,8 +39,8 @@ con AI a partir de ejemplos existentes.
 ## Requerimientos técnicos
 
 - Persistir carpetas y captions en SQLite mediante una migración versionada.
-- Aislar los captions por `folder_id` y eliminar sus registros al eliminarse la
-  carpeta mediante una relación con `ON DELETE CASCADE`.
+- Aislar los captions por `folder_id`. El borrado desde la UI debe ser un
+  soft-delete mediante `archived_at`, conservando la carpeta y sus captions.
 - Exponer endpoints separados para carpetas, captions y generación AI. Las
   mutaciones deben requerir el token de integración local existente.
 - Validar en backend límites de tamaño, campos obligatorios y colores; nunca
@@ -57,6 +57,7 @@ con AI a partir de ejemplos existentes.
 - `GET /api/caption-folders`
 - `POST /api/caption-folders`
 - `PATCH /api/caption-folders/:id`
+- `DELETE /api/caption-folders/:id` (soft-delete)
 - `GET /api/caption-folders/:id`
 - `GET /api/caption-folders/:id/captions`
 - `POST /api/caption-folders/:id/captions`
@@ -74,6 +75,9 @@ visible con una vista previa acotada.
   color y contador actualizado.
 - Editar el título, subtítulo o color de una carpeta desde su vista interior y
   conservar los cambios después de recargar.
+- Mostrar la opción de quitar una carpeta sólo en el modal de edición, pedir
+  confirmación y ocultarla de la biblioteca sin eliminar la carpeta ni sus
+  captions almacenados.
 - Crear y editar un caption con varias líneas; después de recargar, los enters
   siguen presentes tanto en el editor como en la tarjeta.
 - El selector aleatorio sólo abre captions de la carpeta actual.
@@ -92,6 +96,5 @@ visible con una vista previa acotada.
 ## Fuera de alcance inicial
 
 Compartir carpetas, subcarpetas anidadas, búsqueda global de captions, historial
-de versiones, importación masiva, títulos manuales por caption y eliminación
-desde la UI. Se pueden añadir posteriormente sin cambiar el contrato básico de
-texto y color.
+de versiones, importación masiva y títulos manuales por caption. Se pueden añadir
+posteriormente sin cambiar el contrato básico de texto y color.

@@ -1374,6 +1374,26 @@ export async function buildApp(
     },
   );
 
+  app.delete(
+    "/api/caption-folders/:id",
+    { schema: { tags: ["captions"], summary: "Archive a caption folder" } },
+    async (request, reply) => {
+      if (!integrationGuard(settings, request, reply)) return;
+      const { id } = request.params as { id: string };
+      const timestamp = now();
+      const result = db
+        .prepare(
+          "UPDATE caption_folders SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL",
+        )
+        .run(timestamp, timestamp, id);
+      if (!result.changes)
+        return reply.code(404).send({
+          error: { code: "CAPTION_FOLDER_NOT_FOUND", message: "Caption folder not found." },
+        });
+      return reply.code(204).send();
+    },
+  );
+
   app.get(
     "/api/caption-folders/:id",
     { schema: { tags: ["captions"], summary: "Get a caption folder" } },
