@@ -1384,6 +1384,7 @@ function CaptionFolderPage({ id }: { id: string }): ReactElement {
             setFolderDialog(false);
             setRefresh((value) => value + 1);
           }}
+          onDeleted={() => navigate("/captions")}
         />
       )}
     </>
@@ -2518,12 +2519,13 @@ function Modal({ title, onClose, children, wide = false }: { title: string; onCl
   );
 }
 
-function CaptionFolderDialog({ folder, onClose, onSaved }: { folder?: CaptionFolder; onClose: () => void; onSaved: (folder: CaptionFolder) => void }): ReactElement {
+function CaptionFolderDialog({ folder, onClose, onSaved, onDeleted }: { folder?: CaptionFolder; onClose: () => void; onSaved: (folder: CaptionFolder) => void; onDeleted?: () => void }): ReactElement {
   const editing = Boolean(folder);
   const [title, setTitle] = useState(folder?.title ?? "");
   const [subtitle, setSubtitle] = useState(folder?.subtitle ?? "");
   const [color, setColor] = useState(folder?.color ?? "#2468ec");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -2539,6 +2541,23 @@ function CaptionFolderDialog({ folder, onClose, onSaved }: { folder?: CaptionFol
       setError(caught instanceof Error ? caught.message : `Could not ${editing ? "update" : "create"} folder`);
     } finally {
       setSaving(false);
+    }
+  };
+  const deleteFolder = async (): Promise<void> => {
+    if (!folder || !onDeleted) return;
+    const confirmed = window.confirm(
+      `Remove "${folder.title}" from your caption folders? The folder and its captions will be kept in the archive.`,
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await request(`/api/caption-folders/${folder.id}`, { method: "DELETE" });
+      onDeleted();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete folder");
+    } finally {
+      setDeleting(false);
     }
   };
   return (
@@ -2561,8 +2580,9 @@ function CaptionFolderDialog({ folder, onClose, onSaved }: { folder?: CaptionFol
         </label>
         {error && <div className="inline-error">{error}</div>}
         <div className="modal-footer">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" type="submit" disabled={saving}>{saving ? (editing ? "Saving…" : "Creating…") : (editing ? "Save folder" : "Create folder")}</Button>
+          {editing && <Button variant="danger" onClick={() => void deleteFolder()} disabled={saving || deleting} className="modal-danger-action">{deleting ? "Removing…" : "Remove folder"}</Button>}
+          <Button onClick={onClose} disabled={saving || deleting}>Cancel</Button>
+          <Button variant="primary" type="submit" disabled={saving || deleting}>{saving ? (editing ? "Saving…" : "Creating…") : (editing ? "Save folder" : "Create folder")}</Button>
         </div>
       </form>
     </Modal>
