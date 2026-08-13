@@ -352,6 +352,7 @@ h2 { color: #263348; font-size: 17px; }
 .settings-section, .setup-panel { box-shadow: 0 9px 25px rgba(47,67,98,.05); }.setup-panel { background: linear-gradient(110deg, #eef5ff, #fff 60%); }.setup-mark { color: var(--blue); background: #eaf1ff; }
 .empty-state { border-color: #c9d6e5; }.empty-icon { color: var(--blue); background: #edf3ff; }.spinner { border-top-color: var(--blue); }
 .modal-backdrop { background: rgba(35,52,78,.46); backdrop-filter: blur(12px); }.modal { border-color: #dfe6ee; background: #fbfdff; box-shadow: 0 30px 90px rgba(35,52,78,.2); }.step-number { color: var(--blue); background: #eaf1ff; }.selector-card { background: #f4f7fb; border-color: var(--border); }.selector-card.selected { border-color: #9eb9f4; background: #eff5ff; }.selected .selector-check { background: var(--blue); border-color: var(--blue); color: #fff; }
+.modal-danger-action { margin-right: auto; }
 .asset-detail-preview { background: #edf3f9; }.asset-detail-preview video { background: #eaf0f7; }.remote-note { color: var(--muted-2) !important; }
 
 body, button, input, select, textarea { font-family: 'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
