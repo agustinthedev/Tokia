@@ -3967,12 +3967,12 @@ export async function buildApp(
       const value = `%${q}%`;
       const collections = db
         .prepare(
-          `SELECT c.*, COUNT(ca.asset_id) AS asset_count FROM collections c LEFT JOIN collection_assets ca ON ca.collection_id = c.id WHERE LOWER(COALESCE(c.local_title, c.name)) LIKE LOWER(?) OR LOWER(COALESCE(c.local_description, c.description, '')) LIKE LOWER(?) GROUP BY c.id ORDER BY c.updated_at DESC LIMIT 8`,
+          `SELECT c.*, COUNT(ca.asset_id) AS asset_count FROM collections c LEFT JOIN collection_assets ca ON ca.collection_id = c.id WHERE c.archived_at IS NULL AND (LOWER(COALESCE(c.local_title, c.name)) LIKE LOWER(?) OR LOWER(COALESCE(c.local_description, c.description, '')) LIKE LOWER(?)) GROUP BY c.id ORDER BY c.updated_at DESC LIMIT 8`,
         )
         .all(value, value) as Row[];
       const assets = db
         .prepare(
-          `SELECT a.*, GROUP_CONCAT(DISTINCT COALESCE(c.local_title, c.name)) AS collection_name FROM assets a LEFT JOIN collection_assets ca ON ca.asset_id = a.id LEFT JOIN collections c ON c.id = ca.collection_id WHERE LOWER(COALESCE(a.title,'')) LIKE LOWER(?) OR LOWER(COALESCE(a.description,'')) LIKE LOWER(?) OR LOWER(COALESCE(a.external_asset_id,'')) LIKE LOWER(?) GROUP BY a.id ORDER BY a.last_seen_at DESC LIMIT 8`,
+          `SELECT a.*, GROUP_CONCAT(DISTINCT COALESCE(c.local_title, c.name)) AS collection_name FROM assets a LEFT JOIN collection_assets ca ON ca.asset_id = a.id LEFT JOIN collections c ON c.id = ca.collection_id WHERE a.archived_at IS NULL AND (LOWER(COALESCE(a.title,'')) LIKE LOWER(?) OR LOWER(COALESCE(a.description,'')) LIKE LOWER(?) OR LOWER(COALESCE(a.external_asset_id,'')) LIKE LOWER(?)) GROUP BY a.id ORDER BY a.last_seen_at DESC LIMIT 8`,
         )
         .all(value, value, value) as Row[];
       const projects = db
