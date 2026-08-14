@@ -3958,12 +3958,20 @@ export async function buildApp(
     {
       schema: {
         tags: ["search"],
-        summary: "Search collections, assets, and projects",
+        summary: "Search collections, assets, projects, caption folders, and captions",
       },
     },
     async (request) => {
       const q = queryOf(request).q?.trim() ?? "";
-      if (!q) return { query: "", collections: [], assets: [], projects: [] };
+      if (!q)
+        return {
+          query: "",
+          collections: [],
+          assets: [],
+          projects: [],
+          captionFolders: [],
+          captions: [],
+        };
       const value = `%${q}%`;
       const collections = db
         .prepare(
@@ -3980,11 +3988,36 @@ export async function buildApp(
           "SELECT * FROM projects WHERE status != 'archived' AND (LOWER(name) LIKE LOWER(?) OR LOWER(COALESCE(description, '')) LIKE LOWER(?)) ORDER BY updated_at DESC LIMIT 8",
         )
         .all(value, value) as Row[];
+      const captionFolders = db
+        .prepare(
+          `SELECT f.*, COUNT(c.id) AS caption_count
+           FROM caption_folders f
+           LEFT JOIN captions c ON c.folder_id = f.id
+           WHERE f.archived_at IS NULL
+             AND (LOWER(f.title) LIKE LOWER(?) OR LOWER(COALESCE(f.subtitle, '')) LIKE LOWER(?))
+           GROUP BY f.id
+           ORDER BY f.updated_at DESC, f.title COLLATE NOCASE ASC
+           LIMIT 8`,
+        )
+        .all(value, value) as Row[];
+      const captions = db
+        .prepare(
+          `SELECT c.*
+           FROM captions c
+           JOIN caption_folders f ON f.id = c.folder_id
+           WHERE f.archived_at IS NULL
+             AND LOWER(COALESCE(c.body, '')) LIKE LOWER(?)
+           ORDER BY c.updated_at DESC, c.created_at DESC
+           LIMIT 8`,
+        )
+        .all(value) as Row[];
       return {
         query: q,
         collections: collections.map(toCollection),
         assets: assets.map(toAsset),
         projects: projects.map(toProject),
+        captionFolders: captionFolders.map(toCaptionFolder),
+        captions: captions.map(toCaption),
       };
     },
   );

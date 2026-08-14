@@ -122,6 +122,46 @@ describe("captions library", () => {
     expect(missingDelete.statusCode).toBe(404);
   });
 
+  it("includes active caption folders and captions in global search while excluding archived folders", async () => {
+    await setup();
+    const activeFolder = await createFolder("Launch ideas");
+    await createCaption(activeFolder.id, "A launch caption for the global search");
+    const archivedFolder = await createFolder("Archived launch ideas");
+    await createCaption(archivedFolder.id, "An archived launch caption");
+
+    const archived = await app!.inject({
+      method: "DELETE",
+      url: `/api/caption-folders/${archivedFolder.id}`,
+      headers,
+    });
+    expect(archived.statusCode).toBe(204);
+
+    const search = await app!.inject({ method: "GET", url: "/api/search?q=launch" });
+    expect(search.statusCode).toBe(200);
+    expect(search.json().captionFolders).toEqual([
+      expect.objectContaining({ id: activeFolder.id, title: "Launch ideas", captionCount: 1 }),
+    ]);
+    expect(search.json().captions).toEqual([
+      expect.objectContaining({
+        folderId: activeFolder.id,
+        body: "A launch caption for the global search",
+      }),
+    ]);
+    expect(search.json().captionFolders).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: archivedFolder.id })]),
+    );
+    expect(search.json().captions).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ folderId: archivedFolder.id })]),
+    );
+
+    const emptySearch = await app!.inject({ method: "GET", url: "/api/search" });
+    expect(emptySearch.json()).toMatchObject({
+      query: "",
+      captionFolders: [],
+      captions: [],
+    });
+  });
+
   it("validates caption input and persists edits", async () => {
     await setup();
     const folder = await createFolder();

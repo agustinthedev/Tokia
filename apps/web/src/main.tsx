@@ -254,6 +254,8 @@ interface SearchResult {
   collections: Collection[];
   assets: Asset[];
   projects: Project[];
+  captionFolders: CaptionFolder[];
+  captions: Caption[];
 }
 
 if (typeof document !== "undefined") bindPreviewGallery(document);
@@ -779,7 +781,7 @@ function Shell({ route, children, onSearch }: { route: { page: PageKey; id?: str
           </button>
           <button className="global-search" onClick={onSearch} aria-label="Search workspace">
             <Icon name="search" />
-            <span>Search collections, assets, projects...</span>
+            <span>Search collections, assets, projects, captions...</span>
             <kbd>⌘ K</kbd>
           </button>
           <div className="topbar-actions">
@@ -4841,7 +4843,7 @@ function SearchDialog({ onClose }: { onClose: () => void }): ReactElement {
     <Modal title="Search workspace" onClose={onClose} wide>
       <label className="search-field search-dialog-input">
         <Icon name="search" />
-        <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search collections, assets, projects…" />
+        <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search collections, assets, projects, captions…" />
       </label>
       {result.loading && <div className="selection-loading">Searching…</div>}
       {result.error && <ErrorState message={result.error} />}
@@ -4920,7 +4922,51 @@ function SearchDialog({ onClose }: { onClose: () => void }): ReactElement {
               ))}
             </div>
           )}
-          {!result.data.collections.length && !result.data.assets.length && !result.data.projects.length && <EmptyState icon="⌕" title="No results" message="Try a collection name, caption, source ID, or project." />}
+          {result.data.captionFolders.length > 0 && (
+            <div>
+              <div className="eyebrow">Caption folders</div>
+              {result.data.captionFolders.map((item) => (
+                <button
+                  className="search-result"
+                  key={item.id}
+                  onClick={() => {
+                    onClose();
+                    navigate(`/captions/${item.id}`);
+                  }}
+                >
+                  <span className="result-icon"><Icon name="folder" /></span>
+                  <span>
+                    <strong>{item.title}</strong>
+                    <small>{item.captionCount} captions</small>
+                  </span>
+                  <Icon name="arrow" />
+                </button>
+              ))}
+            </div>
+          )}
+          {result.data.captions.length > 0 && (
+            <div>
+              <div className="eyebrow">Captions</div>
+              {result.data.captions.map((item) => (
+                <button
+                  className="search-result"
+                  key={item.id}
+                  onClick={() => {
+                    onClose();
+                    navigate(`/captions/${item.folderId}`);
+                  }}
+                >
+                  <span className="result-icon"><Icon name="captions" /></span>
+                  <span>
+                    <strong>{item.preview || "Untitled caption"}</strong>
+                    <small>Caption</small>
+                  </span>
+                  <Icon name="arrow" />
+                </button>
+              ))}
+            </div>
+          )}
+          {!result.data.collections.length && !result.data.assets.length && !result.data.projects.length && !result.data.captionFolders.length && !result.data.captions.length && <EmptyState icon="⌕" title="No results" message="Try a collection name, caption, source ID, or project." />}
         </div>
       )}
     </Modal>
